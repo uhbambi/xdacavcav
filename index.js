@@ -97,6 +97,8 @@ async function startBot() {
             result = engine.resolveTactic(interaction.user.id, rest.join(':'));
           } else if (action === 'mini') {
             result = engine.resolveMinigameChoice(interaction.user.id, rest.join(':'));
+          } else if (action === 'penal') {
+            result = engine.resolveShootoutKick(interaction.user.id, rest.join(':'));
           } else if (action === 'momento') {
             result = engine.resolveMomento(interaction.user.id, rest.join(':'));
           } else if (action === 'career') {
@@ -110,6 +112,14 @@ async function startBot() {
           } else if (action === 'atributos') {
             result = engine.attributesView(interaction.user.id);
             result.ephemeral = true;
+          } else if (action === 'shop') {
+            if (rest[0] === 'buy') {
+              result = engine.buyItemAction(interaction.user.id, rest[1]);
+            } else {
+              result = engine.shopView(interaction.user.id);
+            }
+          } else if (action === 'train') {
+            result = engine.trainSkillAction(interaction.user.id, rest[0]);
           } else if (action === 'transfer') {
             result = engine.performTransfer(interaction.user.id, rest.join(':'));
           } else {
