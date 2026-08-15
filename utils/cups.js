@@ -1,31 +1,23 @@
 'use strict';
 
-const { getAllClubs, findClub, getLeague } = require('../data/clubs.js');
+const { getAllClubs, findClub, getLeague, getNationalClubsForCup } = require('../data/clubs.js');
 const { NATIONS, findNation, nationAsClub, nationFlag } = require('../data/nations.js');
 const { rand, pick, simulateGenericMatch, penaltyShootout, clubStrength } = require('./simulation.js');
 
 /**
- * Torneos con fase de grupos + mata-mata.
+ * Torneos: Copas Nacionales, Copas Continentales (Libertadores, Sudamericana, Champions, etc.) y Mundial.
  *
- * Un torneo (`tournament`) sirve tanto para las copas continentales como para el Mundial:
- *   grupos (4 equipos, ida y vuelta en copas / una rueda en el Mundial)
- *   -> octavos -> cuartos -> semifinal -> final
- *
- * Se guarda entero dentro del jugador (player.cup / player.worldCup) para que la carrera
- * siga donde quedo aunque se reinicie el bot.
+ * Estructuras soportadas:
+ * - Copa Nacional: Knockout directo (dieciseisavos/octavos/cuartos/semi/final) entre todos los clubes del país.
+ * - Copa Continental: Fase de grupos (4 equipos, 6 fechas ida y vuelta) -> octavos -> cuartos -> semifinal -> final.
+ * - Mundial de Selecciones: Grupos (3 fechas, 1 rueda) -> octavos -> cuartos -> semifinal -> final.
  */
 
-const CUP_NAMES = {
-  CONMEBOL: 'Copa Libertadores',
-  UEFA: 'UEFA Champions League',
-  CONCACAF: 'Concachampions',
-  AFC: 'AFC Champions League'
-};
-
-const KNOCKOUT_ORDER = ['octavos', 'cuartos', 'semifinal', 'final'];
+const KNOCKOUT_ORDER = ['dieciseisavos', 'octavos', 'cuartos', 'semifinal', 'final'];
 
 const PHASE_LABELS = {
   grupos: 'Fase de grupos',
+  dieciseisavos: 'Dieciseisavos de final',
   octavos: 'Octavos de final',
   cuartos: 'Cuartos de final',
   semifinal: 'Semifinal',
@@ -33,7 +25,11 @@ const PHASE_LABELS = {
 };
 
 function cupNameFor(confed) {
-  return CUP_NAMES[confed] || 'Copa Continental';
+  if (confed === 'CONMEBOL') return 'Copa Libertadores';
+  if (confed === 'UEFA') return 'UEFA Champions League';
+  if (confed === 'CONCACAF') return 'Copa de Campeones CONCACAF';
+  if (confed === 'AFC') return 'AFC Champions League Elite';
+  return 'Copa Continental';
 }
 
 function emptyRow() {
@@ -57,22 +53,33 @@ function groupStandings(table) {
     .sort((a, b) => b.pts - a.pts || b.dg - a.dg || b.gf - a.gf);
 }
 
-/** Rivales posibles de copa continental: clubes fuertes de la misma confederacion */
-function continentalPool(player, exclude = []) {
+/** Rivales de copa continental según el torneo al que clasificó */
+function continentalPool(player, qualification = null, exclude = []) {
   const league = getLeague(player.leagueKey);
   const confed = league ? league.confed : 'CONMEBOL';
-  const myMedia = player.clubMedia || 65;
-  const pool = getAllClubs().filter(c =>
-    c.confed === confed &&
-    c.level === 1 &&
-    c.name !== player.club &&
-    !exclude.includes(c.name) &&
-    c.media >= Math.min(70, myMedia - 6)
-  );
-  return pool.length ? pool : getAllClubs().filter(c => c.confed === confed && c.name !== player.club);
+  const type = qualification ? qualification.type : (confed === 'CONMEBOL' ? 'libertadores' : 'champions');
+  const all = getAllClubs().filter(c => c.confed === confed && c.name !== player.club && !exclude.includes(c.name));
+
+  let filtered = [];
+  if (type === 'libertadores') {
+    filtered = all.filter(c => c.level === 1 && c.media >= 63);
+  } else if (type === 'sudamericana') {
+    filtered = all.filter(c => (c.level === 1 || c.media >= 56) && c.media <= 78);
+  } else if (type === 'champions') {
+    filtered = all.filter(c => c.level === 1 && c.media >= 75);
+  } else if (type === 'europa') {
+    filtered = all.filter(c => c.media >= 68 && c.media <= 83);
+  } else if (type === 'conference') {
+    filtered = all.filter(c => c.media >= 60 && c.media <= 77);
+  } else {
+    filtered = all.filter(c => c.level === 1);
+  }
+
+  if (filtered.length >= 3) return filtered;
+  return all.length ? all : [{ name: 'Rival Continental', media: 70, tier: 3 }];
 }
 
-/** Calendario de grupo: 4 equipos, ida y vuelta (6 fechas) */
+/** Calendario de grupo: 4 equipos, ida y vuelta (6 fechas) o 1 vuelta (3 fechas) */
 function buildGroupSchedule(teams, doubleRound) {
   const [a, b, c, d] = teams;
   const single = [
@@ -86,18 +93,18 @@ function buildGroupSchedule(teams, doubleRound) {
   return [...rounds, ...back];
 }
 
-function createTournament({ kind, name, myTeam, participants, doubleRound, knockoutPool }) {
-  const teams = [myTeam, ...participants];
+function createTournament({ kind, name, myTeam, participants = [], doubleRound = false, knockoutPool = [], startingPhase = 'grupos' }) {
+  const teams = startingPhase === 'grupos' ? [myTeam, ...participants] : [myTeam];
   const table = {};
   for (const t of teams) table[t] = emptyRow();
 
-  return {
-    kind,                 // 'copa' | 'mundial'
+  const tourney = {
+    kind,                 // 'copa_nacional' | 'copa' | 'mundial'
     name,
     myTeam,
-    phase: 'grupos',
+    phase: startingPhase,
     groupTeams: teams,
-    groupSchedule: buildGroupSchedule(teams, doubleRound),
+    groupSchedule: startingPhase === 'grupos' ? buildGroupSchedule(teams, doubleRound) : [],
     groupIndex: 0,
     groupTable: table,
     knockoutOpponent: null,
@@ -105,13 +112,52 @@ function createTournament({ kind, name, myTeam, participants, doubleRound, knock
     usedOpponents: [...participants],
     history: []
   };
+
+  if (startingPhase !== 'grupos') {
+    drawKnockoutOpponent(tourney);
+  }
+
+  return tourney;
 }
 
-/** Copa continental del club del jugador, arrancando en fase de grupos */
-function createContinentalCup(player) {
+/** Copa Nacional (Copa del Rey, Copa Chile, Copa Argentina, FA Cup, Copa do Brasil, etc.) */
+function createNationalCup(player) {
+  const league = getLeague(player.leagueKey);
+  const country = league ? league.country : player.nationality;
+  const cupName = (league && league.cupName) ? league.cupName : `Copa de ${country}`;
+
+  const allNationalClubs = getNationalClubsForCup(country);
+  const pool = allNationalClubs.filter(c => c.name !== player.club).map(c => c.name);
+
+  // Determinar fase inicial según cantidad de participantes disponibles
+  let startingPhase = 'octavos';
+  if (pool.length >= 15) {
+    startingPhase = 'dieciseisavos';
+  } else if (pool.length >= 7) {
+    startingPhase = 'octavos';
+  } else if (pool.length >= 3) {
+    startingPhase = 'cuartos';
+  } else {
+    startingPhase = 'semifinal';
+  }
+
+  return createTournament({
+    kind: 'copa_nacional',
+    name: cupName,
+    myTeam: player.club,
+    participants: [],
+    doubleRound: false,
+    knockoutPool: pool.length ? pool : ['Club Rival'],
+    startingPhase
+  });
+}
+
+/** Copa continental del club del jugador (Libertadores, Sudamericana, Champions, Europa, etc.) */
+function createContinentalCup(player, qualification = null) {
   const league = getLeague(player.leagueKey);
   const confed = league ? league.confed : 'CONMEBOL';
-  const pool = continentalPool(player);
+  const cupName = qualification ? qualification.name : cupNameFor(confed);
+  const pool = continentalPool(player, qualification);
 
   const groupRivals = [];
   const used = [];
@@ -125,11 +171,12 @@ function createContinentalCup(player) {
 
   return createTournament({
     kind: 'copa',
-    name: cupNameFor(confed),
+    name: cupName,
     myTeam: player.club,
     participants: groupRivals,
     doubleRound: true,
-    knockoutPool: continentalPool(player, groupRivals).map(c => c.name)
+    knockoutPool: continentalPool(player, qualification, groupRivals).map(c => c.name),
+    startingPhase: 'grupos'
   });
 }
 
@@ -152,7 +199,8 @@ function createWorldCup(player) {
     myTeam: nation.name,
     participants: rivals,
     doubleRound: false,
-    knockoutPool: others.filter(n => !rivals.includes(n.name)).map(n => n.name)
+    knockoutPool: others.filter(n => !rivals.includes(n.name)).map(n => n.name),
+    startingPhase: 'grupos'
   });
 }
 
@@ -163,7 +211,7 @@ function teamAsOpponent(tournament, name) {
     return nation ? nationAsClub(nation) : { name, media: 72, tier: 4 };
   }
   const club = findClub(name);
-  return club || { name, media: 72, tier: 4 };
+  return club || { name, media: 68, tier: 3 };
 }
 
 /** Proximo rival del jugador en el torneo (o null si ya termino) */
@@ -177,7 +225,10 @@ function nextOpponent(tournament) {
     const oppName = pairing.home === tournament.myTeam ? pairing.away : pairing.home;
     return teamAsOpponent(tournament, oppName);
   }
-  if (KNOCKOUT_ORDER.includes(tournament.phase) && tournament.knockoutOpponent) {
+  if (KNOCKOUT_ORDER.includes(tournament.phase)) {
+    if (!tournament.knockoutOpponent) {
+      drawKnockoutOpponent(tournament);
+    }
     return teamAsOpponent(tournament, tournament.knockoutOpponent);
   }
   return null;
@@ -194,12 +245,17 @@ function phaseLabel(tournament) {
 /** ¿Es un partido de los importantes (minijuego garantizado)? */
 function isBigMatch(tournament) {
   if (!tournament) return false;
+  if (tournament.kind === 'copa_nacional') {
+    return tournament.phase === 'semifinal' || tournament.phase === 'final';
+  }
   return tournament.phase !== 'grupos' || tournament.groupIndex >= tournament.groupSchedule.length - 2;
 }
 
 function drawKnockoutOpponent(tournament) {
   const available = tournament.knockoutPool.filter(n => !tournament.usedOpponents.includes(n));
-  const name = available.length ? pick(available) : pick(tournament.knockoutPool.length ? tournament.knockoutPool : ['Rival Continental']);
+  const name = available.length
+    ? pick(available)
+    : pick(tournament.knockoutPool.length ? tournament.knockoutPool : ['Rival']);
   tournament.usedOpponents.push(name);
   tournament.knockoutOpponent = name;
   return name;
@@ -252,7 +308,7 @@ function applyTournamentResult(tournament, myGoals, oppGoals) {
     };
   }
 
-  // Mata-mata
+  // Mata-mata (Knockout)
   const oppName = tournament.knockoutOpponent;
   let won = myGoals > oppGoals;
   let penaltiesText = '';
@@ -278,7 +334,8 @@ function applyTournamentResult(tournament, myGoals, oppGoals) {
     return { status: 'campeon', text: `🏆 ¡**${tournament.myTeam}** es CAMPEÓN de la ${tournament.name}!${penaltiesText}` };
   }
 
-  const nextPhase = KNOCKOUT_ORDER[KNOCKOUT_ORDER.indexOf(tournament.phase) + 1];
+  const currentIndex = KNOCKOUT_ORDER.indexOf(tournament.phase);
+  const nextPhase = KNOCKOUT_ORDER[currentIndex + 1];
   tournament.phase = nextPhase;
   const opponent = drawKnockoutOpponent(tournament);
   return {
@@ -289,6 +346,9 @@ function applyTournamentResult(tournament, myGoals, oppGoals) {
 
 /** Texto de la tabla del grupo, listo para un embed */
 function groupTableText(tournament) {
+  if (!tournament.groupTable || !Object.keys(tournament.groupTable).length) {
+    return `Cuadro de eliminación directa: **${phaseLabel(tournament)}** vs **${tournament.knockoutOpponent || 'Rival'}**`;
+  }
   return groupStandings(tournament.groupTable)
     .map((r, i) => {
       const marker = r.team === tournament.myTeam ? '👉' : `${i + 1}.`;
@@ -311,9 +371,10 @@ function worldCupCallUp(player) {
 }
 
 module.exports = {
-  CUP_NAMES,
+  KNOCKOUT_ORDER,
   PHASE_LABELS,
   cupNameFor,
+  createNationalCup,
   createContinentalCup,
   createWorldCup,
   nextOpponent,
