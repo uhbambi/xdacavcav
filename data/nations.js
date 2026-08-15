@@ -41,7 +41,10 @@ const NATIONS = [
   { name: 'Costa Rica', country: 'Costa Rica', media: 68, confed: 'CONCACAF' },
   { name: 'Polonia', country: 'Polonia', media: 74, confed: 'UEFA' },
   { name: 'Serbia', country: 'Serbia', media: 75, confed: 'UEFA' },
-  { name: 'Turquia', country: 'Turquia', media: 74, confed: 'UEFA' }
+  { name: 'Turquia', country: 'Turquia', media: 74, confed: 'UEFA' },
+  { name: 'Austria', country: 'Austria', media: 76, confed: 'UEFA' },
+  { name: 'Escocia', country: 'Escocia', media: 73, confed: 'UEFA' },
+  { name: 'Grecia', country: 'Grecia', media: 73, confed: 'UEFA' }
 ];
 
 const NATION_FLAGS = {
@@ -51,7 +54,8 @@ const NATION_FLAGS = {
   'Estados Unidos': '🇺🇸', Suiza: '🇨🇭', Dinamarca: '🇩🇰', Japon: '🇯🇵', 'Corea del Sur': '🇰🇷',
   Senegal: '🇸🇳', Nigeria: '🇳🇬', Ecuador: '🇪🇨', Peru: '🇵🇪', Chile: '🇨🇱', Paraguay: '🇵🇾',
   Bolivia: '🇧🇴', Venezuela: '🇻🇪', Australia: '🇦🇺', 'Arabia Saudita': '🇸🇦', Ghana: '🇬🇭',
-  Canada: '🇨🇦', 'Costa Rica': '🇨🇷', Polonia: '🇵🇱', Serbia: '🇷🇸', Turquia: '🇹🇷'
+  Canada: '🇨🇦', 'Costa Rica': '🇨🇷', Polonia: '🇵🇱', Serbia: '🇷🇸', Turquia: '🇹🇷',
+  Austria: '🇦🇹', Escocia: '🏴', Grecia: '🇬🇷'
 };
 
 function findNation(country) {
