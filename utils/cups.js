@@ -204,9 +204,53 @@ function createWorldCup(player) {
   });
 }
 
+/** Torneo Continental de Selecciones (Copa América, Eurocopa, etc.) */
+function createContinentalNationalTournament(player) {
+  const nation = findNation(player.nationality);
+  if (!nation) return null;
+
+  let tourneyName = 'Copa América';
+  let poolNations = [];
+
+  if (nation.confed === 'CONMEBOL' || nation.confed === 'CONCACAF') {
+    tourneyName = 'Copa América';
+    poolNations = NATIONS.filter(n => n.name !== nation.name && (n.confed === 'CONMEBOL' || n.confed === 'CONCACAF'));
+  } else if (nation.confed === 'UEFA') {
+    tourneyName = 'UEFA Eurocopa';
+    poolNations = NATIONS.filter(n => n.name !== nation.name && n.confed === 'UEFA');
+  } else if (nation.confed === 'AFC') {
+    tourneyName = 'Copa Asiática AFC';
+    poolNations = NATIONS.filter(n => n.name !== nation.name && n.confed === 'AFC');
+  } else {
+    tourneyName = 'Copa de Naciones';
+    poolNations = NATIONS.filter(n => n.name !== nation.name && n.confed === 'CAF');
+  }
+
+  if (poolNations.length < 3) {
+    poolNations = NATIONS.filter(n => n.name !== nation.name);
+  }
+
+  const rivals = [];
+  while (rivals.length < 3 && poolNations.length) {
+    const chosen = pick(poolNations.filter(n => !rivals.includes(n.name)));
+    if (!chosen) break;
+    rivals.push(chosen.name);
+  }
+
+  return createTournament({
+    kind: 'copa_seleccion',
+    name: tourneyName,
+    myTeam: nation.name,
+    participants: rivals,
+    doubleRound: false,
+    knockoutPool: poolNations.filter(n => !rivals.includes(n.name)).map(n => n.name),
+    startingPhase: 'grupos'
+  });
+}
+
 /** Convierte el nombre de un rival en algo simulable (club o seleccion) */
 function teamAsOpponent(tournament, name) {
-  if (tournament.kind === 'mundial') {
+  if (tournament.kind === 'mundial' || tournament.kind === 'copa_seleccion') {
     const nation = NATIONS.find(n => n.name === name);
     return nation ? nationAsClub(nation) : { name, media: 72, tier: 4 };
   }
@@ -344,6 +388,38 @@ function applyTournamentResult(tournament, myGoals, oppGoals) {
   };
 }
 
+/** ¿Es la gran final del torneo? */
+function isFinal(tournament) {
+  return tournament && tournament.phase === 'final';
+}
+
+/**
+ * Cierra un mata-mata que se definió por penales interactivos (shootout),
+ * sin volver a tirar una moneda. `wonByMe` viene del resultado de la tanda.
+ */
+function finalizeShootout(tournament, wonByMe, penaltiesText) {
+  const label = PHASE_LABELS[tournament.phase] || tournament.phase;
+
+  if (!wonByMe) {
+    tournament.phase = 'eliminado';
+    return { status: 'eliminado', text: `❌ **${tournament.myTeam}** cae por penales en ${label} de la ${tournament.name}.${penaltiesText || ''}` };
+  }
+
+  if (tournament.phase === 'final') {
+    tournament.phase = 'campeon';
+    return { status: 'campeon', text: `🏆 ¡**${tournament.myTeam}** es CAMPEÓN de la ${tournament.name} tras ganar la definición por penales!${penaltiesText || ''}` };
+  }
+
+  const currentIndex = KNOCKOUT_ORDER.indexOf(tournament.phase);
+  const nextPhase = KNOCKOUT_ORDER[currentIndex + 1];
+  tournament.phase = nextPhase;
+  const opponent = drawKnockoutOpponent(tournament);
+  return {
+    status: 'continue',
+    text: `✅ **${tournament.myTeam}** avanza por penales a ${PHASE_LABELS[nextPhase]} de la ${tournament.name}. Rival: **${opponent}**.${penaltiesText || ''}`
+  };
+}
+
 /** Texto de la tabla del grupo, listo para un embed */
 function groupTableText(tournament) {
   if (!tournament.groupTable || !Object.keys(tournament.groupTable).length) {
@@ -358,16 +434,37 @@ function groupTableText(tournament) {
     .join('\n');
 }
 
-/** ¿Le toca Mundial esta temporada y esta convocado? */
-function worldCupCallUp(player) {
-  if (player.season % 4 !== 0) return { called: false, reason: 'no_year' };
+/** ¿Le toca torneo de Selección esta temporada y está convocado? */
+function nationalTeamCallUp(player) {
   const nation = findNation(player.nationality);
   if (!nation) return { called: false, reason: 'sin_seleccion' };
-  const required = Math.max(62, nation.media - 12);
-  if (player.overall < required) {
-    return { called: false, reason: 'nivel', required, nation };
+
+  const required = Math.max(60, nation.media - 12);
+  const meetsLevel = player.overall >= required;
+
+  // Temporada % 4 === 0: Mundial
+  if (player.season % 4 === 0) {
+    if (!meetsLevel) return { called: false, reason: 'nivel', required, nation, type: 'mundial', cupName: 'Copa del Mundo' };
+    return { called: true, nation, type: 'mundial', cupName: 'Copa del Mundo' };
   }
-  return { called: true, nation };
+
+  // Temporada % 4 === 2: Torneo Continental de Selecciones (Copa América, Eurocopa, etc.)
+  if (player.season % 4 === 2) {
+    let cupName = 'Copa América';
+    if (nation.confed === 'UEFA') cupName = 'UEFA Eurocopa';
+    else if (nation.confed === 'AFC') cupName = 'Copa Asiática AFC';
+    else if (nation.confed === 'CAF') cupName = 'Copa Africana de Naciones';
+
+    if (!meetsLevel) return { called: false, reason: 'nivel', required, nation, type: 'continental', cupName };
+    return { called: true, nation, type: 'continental', cupName };
+  }
+
+  return { called: false, reason: 'no_year' };
+}
+
+/** Compatibilidad */
+function worldCupCallUp(player) {
+  return nationalTeamCallUp(player);
 }
 
 module.exports = {
@@ -377,12 +474,17 @@ module.exports = {
   createNationalCup,
   createContinentalCup,
   createWorldCup,
+  createContinentalNationalTournament,
   nextOpponent,
   phaseLabel,
   isBigMatch,
+  isFinal,
   applyTournamentResult,
+  finalizeShootout,
   groupTableText,
   groupStandings,
   worldCupCallUp,
+  nationalTeamCallUp,
   teamAsOpponent
 };
+
