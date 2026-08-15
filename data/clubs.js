@@ -36,7 +36,10 @@ const FLAGS = {
   Belgica: '🇧🇪',
   Escocia: '🏴',
   Grecia: '🇬🇷',
-  'Arabia Saudita': '🇸🇦'
+  'Arabia Saudita': '🇸🇦',
+  Japon: '🇯🇵',
+  Suiza: '🇨🇭',
+  Austria: '🇦🇹'
 };
 
 /** media -> tier (1 chico ... 5 elite mundial) */
@@ -128,17 +131,29 @@ const RAW_LEAGUES = {
   },
   URUGUAY_A: {
     name: 'Primera Division de Uruguay', country: 'Uruguay', confed: 'CONMEBOL', level: 1,
+    relegatesTo: 'URUGUAY_B',
     cupName: 'Copa AUF Uruguay',
     libertadoresSpots: 4,
     sudamericanaSpots: 4,
     clubs: [
       ['Penarol', 70], ['Nacional', 70], ['Defensor Sporting', 63], ['Liverpool FC Uruguay', 63],
-      ['Danubio', 60], ['Montevideo Wanderers', 59], ['Cerro Largo', 58], ['Racing de Montevideo', 57],
-      ['Boston River', 57], ['Progreso', 55], ['River Plate de Montevideo', 56], ['Plaza Colonia', 55]
+      ['Danubio', 61], ['Montevideo Wanderers', 59], ['Cerro Largo', 58], ['Racing de Montevideo', 57],
+      ['Boston River', 57], ['Progreso', 56], ['River Plate de Montevideo', 56], ['Fenix', 55]
+    ]
+  },
+  URUGUAY_B: {
+    name: 'Segunda Division de Uruguay', country: 'Uruguay', confed: 'CONMEBOL', level: 2,
+    promotesTo: 'URUGUAY_A',
+    cupName: 'Copa AUF Uruguay',
+    clubs: [
+      ['Plaza Colonia', 57], ['Juventud de Las Piedras', 56], ['Rentistas', 56], ['Miramar Misiones', 55],
+      ['Bella Vista', 54], ['Albion FC', 54], ['Atenas de San Carlos', 53], ['Tacuarembo', 53],
+      ['Cerrito', 53], ['Oriental de La Paz', 52], ['La Luz', 53], ['Sud America', 52]
     ]
   },
   COLOMBIA_A: {
     name: 'Categoria Primera A', country: 'Colombia', confed: 'CONMEBOL', level: 1,
+    relegatesTo: 'COLOMBIA_B',
     cupName: 'Copa Colombia',
     libertadoresSpots: 4,
     sudamericanaSpots: 4,
@@ -147,12 +162,22 @@ const RAW_LEAGUES = {
       ['Junior de Barranquilla', 68], ['Deportivo Cali', 65], ['Independiente Medellin', 66],
       ['Santa Fe', 66], ['Once Caldas', 62], ['Deportes Tolima', 65], ['Aguilas Doradas', 61],
       ['Envigado', 58], ['La Equidad', 59], ['Atletico Bucaramanga', 63], ['Deportivo Pasto', 60],
-      ['Boyaca Chico', 58], ['Union Magdalena', 57], ['Alianza Petrolera', 58],
-      ['Deportivo Pereira', 60], ['Fortaleza CEIF', 55], ['Llaneros FC', 54]
+      ['Boyaca Chico', 58], ['Alianza FC', 58], ['Deportivo Pereira', 60], ['Fortaleza CEIF', 55]
+    ]
+  },
+  COLOMBIA_B: {
+    name: 'Torneo BetPlay Dimayor', country: 'Colombia', confed: 'CONMEBOL', level: 2,
+    promotesTo: 'COLOMBIA_A',
+    cupName: 'Copa Colombia',
+    clubs: [
+      ['Real Cartagena', 58], ['Cucuta Deportivo', 59], ['Deportes Quindio', 57],
+      ['Union Magdalena', 58], ['Atletico Huila', 57], ['Llaneros FC', 56],
+      ['Leones FC', 55], ['Cortulua Yumbo', 54], ['Orsomarso', 53], ['Real Santander', 52]
     ]
   },
   PERU_A: {
     name: 'Liga 1 de Peru', country: 'Peru', confed: 'CONMEBOL', level: 1,
+    relegatesTo: 'PERU_B',
     cupName: 'Copa Bicentenario',
     libertadoresSpots: 4,
     sudamericanaSpots: 4,
@@ -162,8 +187,19 @@ const RAW_LEAGUES = {
       ['Cesar Vallejo', 58], ['Alianza Atletico', 55], ['Sport Boys', 54], ['Cusco FC', 57]
     ]
   },
+  PERU_B: {
+    name: 'Liga 2 de Peru', country: 'Peru', confed: 'CONMEBOL', level: 2,
+    promotesTo: 'PERU_A',
+    cupName: 'Copa Bicentenario',
+    clubs: [
+      ['Deportivo Municipal', 56], ['Academia Cantolao', 55], ['Juan Aurich', 55],
+      ['Universidad San Martin', 54], ['Ayacucho FC', 55], ['Santos FC', 53],
+      ['Carlos Stein', 52], ['Pirata FC', 51], ['Comerciantes FC', 53], ['Coopsol', 52]
+    ]
+  },
   ECUADOR_A: {
     name: 'Liga Pro de Ecuador', country: 'Ecuador', confed: 'CONMEBOL', level: 1,
+    relegatesTo: 'ECUADOR_B',
     cupName: 'Copa Ecuador',
     libertadoresSpots: 4,
     sudamericanaSpots: 4,
@@ -171,6 +207,16 @@ const RAW_LEAGUES = {
       ['Independiente del Valle', 71], ['Barcelona SC', 68], ['Liga de Quito', 68],
       ['Emelec', 64], ['Aucas', 62], ['Universidad Catolica de Quito', 60],
       ['Delfin', 58], ['El Nacional', 57], ['Orense', 56], ['Macara', 55]
+    ]
+  },
+  ECUADOR_B: {
+    name: 'LigaPro Serie B', country: 'Ecuador', confed: 'CONMEBOL', level: 2,
+    promotesTo: 'ECUADOR_A',
+    cupName: 'Copa Ecuador',
+    clubs: [
+      ['Guayaquil City', 57], ['Manta FC', 56], ['9 de Octubre', 56],
+      ['Gualaceo', 55], ['Cuniburo', 54], ['Chacaritas', 53],
+      ['Leones del Norte', 52], ['San Antonio FC', 52]
     ]
   },
   PARAGUAY_A: {
@@ -436,6 +482,28 @@ const RAW_LEAGUES = {
       ['Aris', 67], ['OFI Creta', 63], ['Volos', 61], ['Atromitos', 62]
     ]
   },
+  SUIZA_A: {
+    name: 'Superliga Suiza', country: 'Suiza', confed: 'UEFA', level: 1,
+    cupName: 'Copa Suiza',
+    championsSpots: 2,
+    europaSpots: 1,
+    conferenceSpots: 1,
+    clubs: [
+      ['BSC Young Boys', 74], ['FC Basel', 73], ['Servette FC', 71], ['FC Zurich', 71],
+      ['FC Lugano', 70], ['FC Luzern', 69], ['FC St. Gallen', 69], ['Grasshopper', 68]
+    ]
+  },
+  AUSTRIA_A: {
+    name: 'Bundesliga Austriaca', country: 'Austria', confed: 'UEFA', level: 1,
+    cupName: 'Copa de Austria',
+    championsSpots: 2,
+    europaSpots: 1,
+    conferenceSpots: 1,
+    clubs: [
+      ['Red Bull Salzburg', 77], ['Sturm Graz', 74], ['LASK Linz', 72], ['Rapid Viena', 71],
+      ['Austria Viena', 70], ['Wolfsberger AC', 68], ['TSV Hartberg', 67], ['Austria Klagenfurt', 66]
+    ]
+  },
 
   // ───────────────────────── AFC ─────────────────────────
   ARABIA_A: {
@@ -446,6 +514,17 @@ const RAW_LEAGUES = {
       ['Al-Hilal', 80], ['Al-Nassr', 79], ['Al-Ittihad', 78], ['Al-Ahli', 77],
       ['Al-Shabab', 72], ['Al-Ettifaq', 71], ['Al-Taawoun', 68], ['Al-Fateh', 67],
       ['Al-Khaleej', 65], ['Damac', 64]
+    ]
+  },
+  JAPON_A: {
+    name: 'J1 League', country: 'Japon', confed: 'AFC', level: 1,
+    cupName: "Emperor's Cup",
+    championsSpots: 3,
+    clubs: [
+      ['Vissel Kobe', 73], ['Yokohama F. Marinos', 72], ['Kawasaki Frontale', 72],
+      ['Urawa Red Diamonds', 72], ['Sanfrecce Hiroshima', 71], ['Kashima Antlers', 71],
+      ['Gamba Osaka', 70], ['FC Tokyo', 69], ['Nagoya Grampus', 69], ['Cerezo Osaka', 69],
+      ['Albirex Niigata', 67], ['Kashiwa Reysol', 67]
     ]
   }
 };
@@ -571,8 +650,14 @@ function getContinentalQualification(leagueKey, position) {
 
 /** Ligas jugables al crear jugador, agrupadas por pais (se arranca en la B si existe) */
 function startingLeagueKeyFor(countryKey) {
-  const second = `${countryKey}_B`;
-  return LEAGUES[second] ? second : `${countryKey}_A`;
+  if (!countryKey) return 'CHILE_B';
+  const cleanKey = countryKey.toUpperCase().trim();
+  const second = `${cleanKey}_B`;
+  if (LEAGUES[second]) return second;
+  const first = `${cleanKey}_A`;
+  if (LEAGUES[first]) return first;
+  if (LEAGUES[cleanKey]) return cleanKey;
+  return 'CHILE_B';
 }
 
 module.exports = {
