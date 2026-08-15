@@ -151,11 +151,20 @@ function simulateMatch(player, club, opponentClub, tacticKey = 'equilibrado', op
   let red = false;
   if (Math.random() < cardBase) {
     yellow = true;
-    events.push({ minute: rand(10, 88), type: 'amarilla', text: `🟨 Tarjeta amarilla para **${player.name}**.` });
+    const yellowMin = rand(10, 75);
+    events.push({ minute: yellowMin, type: 'amarilla', text: `🟨 Tarjeta amarilla para **${player.name}**.` });
+
+    // Posibilidad de segunda amarilla si ya vio una
+    if (Math.random() < 0.08) {
+      red = true;
+      events.push({ minute: rand(yellowMin + 5, 89), type: 'roja', text: `🟨🟥 ¡Segunda amarilla para **${player.name}**! Expulsión (1 partido de suspensión).` });
+    }
   }
-  if (Math.random() < 0.02) {
+
+  // Roja directa
+  if (!red && Math.random() < 0.02) {
     red = true;
-    events.push({ minute: rand(10, 88), type: 'roja', text: `🟥 ¡Tarjeta roja para **${player.name}**!` });
+    events.push({ minute: rand(10, 88), type: 'roja', text: `🟥 ¡Tarjeta roja directa para **${player.name}**! (1 partido de suspensión).` });
   }
 
   // Lesion: mientras mas fisico, menos chance y menos partidos de baja
