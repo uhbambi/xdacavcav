@@ -19,12 +19,13 @@ module.exports = {
         '**/atributos** — tus atributos tipo FIFA: ritmo, tiro, pase, regate, defensa y fisico.\n\n' +
         '**/transferir** — al terminar la temporada, revisa tus ofertas y elige nuevo club (o quedate con `club:quedarme`).\n\n' +
         '**/retirar** — termina tu carrera y recibe tu veredicto final: desde "Nombre Olvidado" hasta "Leyenda Absoluta".\n\n' +
-        '⚡ **Atributos**: tu media sale de tus 6 atributos ponderados por tu puesto, y suben segun como rindas cada temporada.\n' +
+        '⚡ **Atributos**: tu media sale de tus 6 atributos ponderados por tu puesto, y suben según como rindas cada temporada.\n' +
         '🎮 **Minijuegos**: en los partidos importantes se frena el partido y te salen 3 botones (penal, mano a mano, tiro libre, centro, cabezazo o atajada). Solo uno termina en gol.\n' +
-        '🚑 **Lesiones**: si te lesionas, tu equipo igual juega esas fechas sin vos y la liga avanza.\n' +
-        '🌎 **Copas**: si sales top 4 de primera division, jugas la Libertadores/Champions/Concachampions **desde la fase de grupos**, y despues octavos, cuartos, semi y final.\n' +
-        '⬆️⬇️ **Ascensos y descensos**: 1° o 2° en la B te suben; ultimos dos de primera se van a la B.\n' +
-        '🌍 **Mundial**: cada 4 temporadas, si tu media alcanza, te convocan a tu seleccion.'
+        '🚑 **Lesiones y 🟥 Sanciones**: si te lesionas o te expulsan con tarjeta roja, tu equipo juega las fechas sin vos mientras cumples la recuperación o suspensión.\n' +
+        '🏆 **Copas Nacionales**: cada temporada tu club disputa la Copa Nacional de su país (Copa Chile, Copa Argentina, Copa del Rey, FA Cup, Copa do Brasil, etc.) en eliminación directa.\n' +
+        '🌎 **Copas Continentales**: según tu posición en liga clasificas a Copa Libertadores / Copa Sudamericana (CONMEBOL), UEFA Champions League / Europa League / Conference League (UEFA), Concachampions o AFC Champions League.\n' +
+        '⬆️⬇️ **Ascensos y descensos**: 1° o 2° en la B te suben; los últimos de primera descienden a la B.\n' +
+        '🌍 **Mundial**: cada 4 temporadas, si tu media alcanza, te convocan a tu selección nacional.'
       );
     await interaction.reply({ embeds: [embed] });
   }
