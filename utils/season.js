@@ -176,8 +176,11 @@ function finishSeason(player) {
   player.leagueClubs = [];
   player.matchdayIndex = 0;
   player.table = {};
+  player.nationalCup = null;
   player.cup = null;
   player.worldCup = null;
+  player.continentalNationalCup = null;
+  player.trainingsThisWeek = 0;
   player.injuredMatches = 0;
   player.offers = generateOffers(player).map(c => c.name);
   player.stage = 'entretemporada';
