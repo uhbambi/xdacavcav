@@ -327,5 +327,3 @@ module.exports = {
   reputation,
   seasonAwards
 };
-
-};
