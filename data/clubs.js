@@ -54,7 +54,7 @@ const RAW_LEAGUES = {
     name: 'Primera Division de Chile', country: 'Chile', confed: 'CONMEBOL', level: 1,
     relegatesTo: 'CHILE_B',
     cupName: 'Copa Chile',
-    libertadoresSpots: 3,
+    libertadoresSpots: 4,
     sudamericanaSpots: 4,
     clubs: [
       ['Colo-Colo', 72], ['Universidad de Chile', 71], ['Universidad Catolica', 71],
@@ -81,8 +81,8 @@ const RAW_LEAGUES = {
     name: 'Liga Profesional de Argentina', country: 'Argentina', confed: 'CONMEBOL', level: 1,
     relegatesTo: 'ARGENTINA_B',
     cupName: 'Copa Argentina',
-    libertadoresSpots: 4,
-    sudamericanaSpots: 4,
+    libertadoresSpots: 6,
+    sudamericanaSpots: 6,
     clubs: [
       ['River Plate', 79], ['Boca Juniors', 78], ['Racing Club', 75], ['Independiente', 72],
       ['Estudiantes de La Plata', 73], ['Velez Sarsfield', 72], ['Talleres', 72],
@@ -106,8 +106,8 @@ const RAW_LEAGUES = {
     name: 'Brasileirao Serie A', country: 'Brasil', confed: 'CONMEBOL', level: 1,
     relegatesTo: 'BRASIL_B',
     cupName: 'Copa do Brasil',
-    libertadoresSpots: 4,
-    sudamericanaSpots: 4,
+    libertadoresSpots: 6,
+    sudamericanaSpots: 6,
     clubs: [
       ['Flamengo', 81], ['Palmeiras', 80], ['Atletico Mineiro', 76], ['Sao Paulo', 75],
       ['Fluminense', 74], ['Botafogo', 76], ['Corinthians', 73], ['Gremio', 73],
@@ -129,8 +129,8 @@ const RAW_LEAGUES = {
   URUGUAY_A: {
     name: 'Primera Division de Uruguay', country: 'Uruguay', confed: 'CONMEBOL', level: 1,
     cupName: 'Copa AUF Uruguay',
-    libertadoresSpots: 2,
-    sudamericanaSpots: 2,
+    libertadoresSpots: 4,
+    sudamericanaSpots: 4,
     clubs: [
       ['Penarol', 70], ['Nacional', 70], ['Defensor Sporting', 63], ['Liverpool FC Uruguay', 63],
       ['Danubio', 60], ['Montevideo Wanderers', 59], ['Cerro Largo', 58], ['Racing de Montevideo', 57],
@@ -140,8 +140,8 @@ const RAW_LEAGUES = {
   COLOMBIA_A: {
     name: 'Categoria Primera A', country: 'Colombia', confed: 'CONMEBOL', level: 1,
     cupName: 'Copa Colombia',
-    libertadoresSpots: 2,
-    sudamericanaSpots: 2,
+    libertadoresSpots: 4,
+    sudamericanaSpots: 4,
     clubs: [
       ['Atletico Nacional', 71], ['Millonarios', 69], ['America de Cali', 67],
       ['Junior de Barranquilla', 68], ['Deportivo Cali', 65], ['Independiente Medellin', 66],
@@ -154,8 +154,8 @@ const RAW_LEAGUES = {
   PERU_A: {
     name: 'Liga 1 de Peru', country: 'Peru', confed: 'CONMEBOL', level: 1,
     cupName: 'Copa Bicentenario',
-    libertadoresSpots: 2,
-    sudamericanaSpots: 2,
+    libertadoresSpots: 4,
+    sudamericanaSpots: 4,
     clubs: [
       ['Universitario', 65], ['Alianza Lima', 65], ['Sporting Cristal', 65],
       ['Melgar', 62], ['Cienciano', 59], ['Sport Huancayo', 58],
@@ -165,8 +165,8 @@ const RAW_LEAGUES = {
   ECUADOR_A: {
     name: 'Liga Pro de Ecuador', country: 'Ecuador', confed: 'CONMEBOL', level: 1,
     cupName: 'Copa Ecuador',
-    libertadoresSpots: 2,
-    sudamericanaSpots: 2,
+    libertadoresSpots: 4,
+    sudamericanaSpots: 4,
     clubs: [
       ['Independiente del Valle', 71], ['Barcelona SC', 68], ['Liga de Quito', 68],
       ['Emelec', 64], ['Aucas', 62], ['Universidad Catolica de Quito', 60],
@@ -176,8 +176,8 @@ const RAW_LEAGUES = {
   PARAGUAY_A: {
     name: 'Division Profesional de Paraguay', country: 'Paraguay', confed: 'CONMEBOL', level: 1,
     cupName: 'Copa Paraguay',
-    libertadoresSpots: 2,
-    sudamericanaSpots: 2,
+    libertadoresSpots: 4,
+    sudamericanaSpots: 4,
     clubs: [
       ['Olimpia', 67], ['Cerro Porteno', 67], ['Libertad', 66], ['Guarani de Asuncion', 62],
       ['Nacional de Asuncion', 58], ['Sportivo Luqueno', 56], ['Tacuary', 55], ['General Caballero', 54]
@@ -186,8 +186,8 @@ const RAW_LEAGUES = {
   BOLIVIA_A: {
     name: 'Division Profesional de Bolivia', country: 'Bolivia', confed: 'CONMEBOL', level: 1,
     cupName: 'Copa Bolivia',
-    libertadoresSpots: 2,
-    sudamericanaSpots: 2,
+    libertadoresSpots: 4,
+    sudamericanaSpots: 4,
     clubs: [
       ['The Strongest', 62], ['Bolivar', 63], ['Always Ready', 60], ['Oriente Petrolero', 57],
       ['Blooming', 55], ['Wilstermann', 56], ['Nacional Potosi', 54], ['Aurora', 52]
@@ -196,8 +196,8 @@ const RAW_LEAGUES = {
   VENEZUELA_A: {
     name: 'Liga FUTVE', country: 'Venezuela', confed: 'CONMEBOL', level: 1,
     cupName: 'Copa Venezuela',
-    libertadoresSpots: 2,
-    sudamericanaSpots: 2,
+    libertadoresSpots: 4,
+    sudamericanaSpots: 4,
     clubs: [
       ['Caracas FC', 60], ['Deportivo Tachira', 60], ['Carabobo FC', 58], ['Metropolitanos', 56],
       ['Zamora FC', 56], ['Monagas SC', 55], ['Estudiantes de Merida', 53], ['Portuguesa FC', 52]
@@ -371,6 +371,7 @@ const RAW_LEAGUES = {
     cupName: 'Taca de Portugal',
     championsSpots: 2,
     europaSpots: 2,
+    conferenceSpots: 1,
     clubs: [
       ['Benfica', 82], ['Porto', 81], ['Sporting CP', 82], ['Braga', 76],
       ['Vitoria de Guimaraes', 72], ['Boavista', 68], ['Famalicao', 68], ['Rio Ave', 67],
@@ -382,6 +383,7 @@ const RAW_LEAGUES = {
     cupName: 'KNVB Beker',
     championsSpots: 2,
     europaSpots: 2,
+    conferenceSpots: 1,
     clubs: [
       ['PSV Eindhoven', 79], ['Feyenoord', 78], ['Ajax', 78], ['AZ Alkmaar', 74],
       ['Twente', 73], ['Utrecht', 71], ['Heerenveen', 68], ['Sparta Rotterdam', 66],
@@ -393,6 +395,7 @@ const RAW_LEAGUES = {
     cupName: 'Turkiye Kupasi',
     championsSpots: 2,
     europaSpots: 2,
+    conferenceSpots: 1,
     clubs: [
       ['Galatasaray', 79], ['Fenerbahce', 79], ['Besiktas', 76], ['Trabzonspor', 74],
       ['Basaksehir', 72], ['Adana Demirspor', 69], ['Konyaspor', 67], ['Antalyaspor', 66],
@@ -403,7 +406,8 @@ const RAW_LEAGUES = {
     name: 'Jupiler Pro League', country: 'Belgica', confed: 'UEFA', level: 1,
     cupName: 'Copa de Belgica',
     championsSpots: 2,
-    europaSpots: 2,
+    europaSpots: 1,
+    conferenceSpots: 1,
     clubs: [
       ['Club Brujas', 76], ['Anderlecht', 74], ['Royal Antwerp', 72], ['Gante', 71],
       ['Genk', 72], ['Standard de Lieja', 69], ['Union Saint-Gilloise', 72], ['Cercle Brugge', 67],
@@ -415,6 +419,7 @@ const RAW_LEAGUES = {
     cupName: 'Scottish Cup',
     championsSpots: 2,
     europaSpots: 1,
+    conferenceSpots: 1,
     clubs: [
       ['Celtic', 75], ['Rangers', 74], ['Aberdeen', 67], ['Hearts', 66],
       ['Hibernian', 65], ['Dundee United', 63], ['Motherwell', 62], ['Kilmarnock', 61]
@@ -425,6 +430,7 @@ const RAW_LEAGUES = {
     cupName: 'Copa de Grecia',
     championsSpots: 2,
     europaSpots: 1,
+    conferenceSpots: 1,
     clubs: [
       ['Olympiacos', 74], ['Panathinaikos', 72], ['AEK Atenas', 71], ['PAOK', 72],
       ['Aris', 67], ['OFI Creta', 63], ['Volos', 61], ['Atromitos', 62]
