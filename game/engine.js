@@ -11,12 +11,12 @@ const {
   updateTable, standingsSorted, applyPromotionRelegation, finishSeason
 } = require('../utils/season.js');
 const {
-  createNationalCup, createContinentalCup, createWorldCup, nextOpponent, phaseLabel,
-  isBigMatch, applyTournamentResult, groupTableText, worldCupCallUp, cupNameFor
+  createNationalCup, createContinentalCup, createWorldCup, createContinentalNationalTournament, nextOpponent, phaseLabel,
+  isBigMatch, isFinal, applyTournamentResult, finalizeShootout, KNOCKOUT_ORDER, groupTableText, worldCupCallUp, nationalTeamCallUp, cupNameFor
 } = require('../utils/cups.js');
 const { createMinigame, minigameDef, resolveMinigame } = require('../utils/minigames.js');
 const { maybePickMomento, maybePickCareerEvent, applyEffect, MOMENTOS, EVENTOS_CARRERA } = require('../utils/decisions.js');
-const { reputation } = require('../utils/player.js');
+const { reputation, SHOP_ITEMS, buyItem, trainSkill, retirementVerdict } = require('../utils/player.js');
 
 function flagFor(country) {
   return FLAGS[country] || '';
@@ -64,6 +64,14 @@ function minigameRow(userId, def) {
   );
 }
 
+function shootoutRow(userId) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`penal:${userId}:0`).setLabel('Izquierda').setEmoji('⬅️').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`penal:${userId}:1`).setLabel('Centro').setEmoji('⬆️').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`penal:${userId}:2`).setLabel('Derecha').setEmoji('➡️').setStyle(ButtonStyle.Primary)
+  );
+}
+
 function offersRows(userId, offers) {
   const buttons = offers.slice(0, 20).map((clubName, i) =>
     new ButtonBuilder()
@@ -104,6 +112,9 @@ function competitionHeader(player) {
   if (player.stage === 'copa' && player.cup) {
     return `🌎 ${player.cup.name} · ${phaseLabel(player.cup)}`;
   }
+  if (player.stage === 'copa_seleccion' && player.continentalNationalCup) {
+    return `🌎 ${player.continentalNationalCup.name} · ${phaseLabel(player.continentalNationalCup)}`;
+  }
   if (player.stage === 'mundial' && player.worldCup) {
     return `🌍 ${player.worldCup.name} · ${phaseLabel(player.worldCup)}`;
   }
@@ -113,7 +124,9 @@ function competitionHeader(player) {
 }
 
 function myTeamName(player) {
-  return player.stage === 'mundial' && player.worldCup ? player.worldCup.myTeam : player.club;
+  if (player.stage === 'mundial' && player.worldCup) return player.worldCup.myTeam;
+  if (player.stage === 'copa_seleccion' && player.continentalNationalCup) return player.continentalNationalCup.myTeam;
+  return player.club;
 }
 
 function matchEmbed(title, color, teamName, result, extraDesc) {
@@ -128,6 +141,10 @@ function matchEmbed(title, color, teamName, result, extraDesc) {
     eventsText
   ].filter(x => x !== null).join('\n').slice(0, 4000);
 
+  const statField = result.playerSaves !== undefined && result.playerSaves > 0
+    ? { name: 'Tus numeros', value: `🧤 ${result.playerSaves} Atajadas ${result.cleanSheet ? '· 🛡️ Arco en Cero' : ''}`, inline: true }
+    : { name: 'Tus numeros', value: `⚽ ${result.playerGoals} · 🅰️ ${result.playerAssists}`, inline: true };
+
   return new EmbedBuilder()
     .setColor(color)
     .setTitle(title)
@@ -135,14 +152,15 @@ function matchEmbed(title, color, teamName, result, extraDesc) {
     .addFields(
       { name: 'Tu rating', value: `${result.rating}${result.motm ? ' ⭐ Figura del partido' : ''}`, inline: true },
       { name: 'Resultado', value: result.result === 'V' ? '✅ Victoria' : result.result === 'E' ? '🟡 Empate' : '❌ Derrota', inline: true },
-      { name: 'Tus numeros', value: `⚽ ${result.playerGoals} · 🅰️ ${result.playerAssists}`, inline: true }
+      statField
     );
 }
 
 function tacticEmbed(player, opponentName, headerTitle) {
   const oppClub = findClub(opponentName);
   const oppLeague = oppClub ? getLeague(oppClub.leagueKey) : null;
-  const oppFlag = player.stage === 'mundial' ? nationFlag(opponentName) : (oppLeague ? flagFor(oppLeague.country) : '');
+  const isNationalMatch = player.stage === 'mundial' || player.stage === 'copa_seleccion';
+  const oppFlag = isNationalMatch ? nationFlag(opponentName) : (oppLeague ? flagFor(oppLeague.country) : '');
   const oppMedia = oppClub ? ` (media ${oppClub.media})` : '';
 
   return new EmbedBuilder()
@@ -162,6 +180,22 @@ function minigameEmbed(player, pending) {
     .setDescription(
       `${def.prompt(pending)}\n\n` +
       `Solo **uno** de los 3 botones termina en gol. Tu **${ATTR_LABELS[def.attr]}** (${player.attributes[def.attr]}) decide si la metés igual cuando el arquero adivina.`
+    );
+}
+
+function shootoutEmbed(player, pending) {
+  const isGoalkeeper = player.position === 'POR';
+  const roleText = isGoalkeeper ? '🧤 Sos el arquero: elegí adónde tirarte a tapar.' : '⚽ Vas a patear: elegí adónde cruzar el remate.';
+  const historyText = pending.history && pending.history.length ? pending.history.join('\n') : 'Tanda por comenzar...';
+
+  return new EmbedBuilder()
+    .setColor(0xe74c3c)
+    .setTitle(`🎯 Definición por penales · ${pending.tournamentName}`)
+    .setDescription(
+      `**${myTeamName(player)} ${pending.myScore} - ${pending.oppScore} ${pending.oppName}**\n` +
+      `Penal n° ${pending.round} (de ${pending.maxRounds})\n\n` +
+      `${roleText}\n\n` +
+      `**Historial:**\n${historyText}`
     );
 }
 
@@ -233,6 +267,10 @@ function simulateStep(userId) {
   }
 
   // Cosas pendientes primero
+  if (player.pendingShootout) {
+    return { ok: true, ephemeral: false, embeds: [shootoutEmbed(player, player.pendingShootout)], components: [shootoutRow(userId)] };
+  }
+
   if (player.pendingMinigame) {
     const def = minigameDef(player.pendingMinigame.type);
     if (def) {
@@ -286,10 +324,10 @@ function simulateStep(userId) {
     return resolveLeagueEnd(userId, player);
   }
 
-  if (player.stage === 'copa_nacional' || player.stage === 'copa' || player.stage === 'mundial') {
+  if (player.stage === 'copa_nacional' || player.stage === 'copa' || player.stage === 'copa_seleccion' || player.stage === 'mundial') {
     const tournament = player.stage === 'copa_nacional'
       ? player.nationalCup
-      : (player.stage === 'copa' ? player.cup : player.worldCup);
+      : (player.stage === 'copa' ? player.cup : (player.stage === 'copa_seleccion' ? player.continentalNationalCup : player.worldCup));
     const opponent = tournament ? nextOpponent(tournament) : null;
     if (!opponent) return closeTournament(userId, player);
     return { ok: true, ephemeral: false, embeds: [tacticEmbed(player, opponent.name, competitionHeader(player))], components: [tacticRow(userId)] };
@@ -325,14 +363,15 @@ function playWhileSuspended(userId, player) {
 
   const tournament = player.stage === 'copa_nacional'
     ? player.nationalCup
-    : (player.stage === 'copa' ? player.cup : player.worldCup);
+    : (player.stage === 'copa' ? player.cup : (player.stage === 'copa_seleccion' ? player.continentalNationalCup : player.worldCup));
   const opponent = tournament ? nextOpponent(tournament) : null;
   if (!opponent) {
     storage.setPlayer(userId, player);
     return closeTournament(userId, player);
   }
 
-  const myTeam = player.stage === 'mundial'
+  const isNationalMatch = player.stage === 'mundial' || player.stage === 'copa_seleccion';
+  const myTeam = isNationalMatch
     ? { name: tournament.myTeam, media: (findNation(player.nationality) || { media: 72 }).media }
     : findClub(player.club);
   const result = simulateMatchWithoutPlayer(myTeam, opponent, player.overall);
@@ -386,14 +425,15 @@ function playWhileInjured(userId, player) {
 
   const tournament = player.stage === 'copa_nacional'
     ? player.nationalCup
-    : (player.stage === 'copa' ? player.cup : player.worldCup);
+    : (player.stage === 'copa' ? player.cup : (player.stage === 'copa_seleccion' ? player.continentalNationalCup : player.worldCup));
   const opponent = tournament ? nextOpponent(tournament) : null;
   if (!opponent) {
     storage.setPlayer(userId, player);
     return closeTournament(userId, player);
   }
 
-  const myTeam = player.stage === 'mundial'
+  const isNationalMatch = player.stage === 'mundial' || player.stage === 'copa_seleccion';
+  const myTeam = isNationalMatch
     ? { name: tournament.myTeam, media: (findNation(player.nationality) || { media: 72 }).media }
     : findClub(player.club);
   const result = simulateMatchWithoutPlayer(myTeam, opponent, player.overall);
@@ -422,10 +462,10 @@ function playWhileInjured(userId, player) {
 
 /** ¿Este partido merece minijuego? Copas, Mundial, clásicos y definiciones de liga */
 function shouldTriggerMinigame(player, opponentName) {
-  if (player.stage === 'copa_nacional' || player.stage === 'copa' || player.stage === 'mundial') {
+  if (player.stage === 'copa_nacional' || player.stage === 'copa' || player.stage === 'copa_seleccion' || player.stage === 'mundial') {
     const tournament = player.stage === 'copa_nacional'
       ? player.nationalCup
-      : (player.stage === 'copa' ? player.cup : player.worldCup);
+      : (player.stage === 'copa' ? player.cup : (player.stage === 'copa_seleccion' ? player.continentalNationalCup : player.worldCup));
     return isBigMatch(tournament) || Math.random() < 0.35;
   }
 
@@ -443,6 +483,9 @@ function resolveTactic(userId, tacticKey) {
   const player = storage.getPlayer(userId);
   if (!player) return noPlayer();
   if (!TACTICS[tacticKey]) tacticKey = 'equilibrado';
+  if (player.pendingShootout) {
+    return { ok: true, ephemeral: false, embeds: [shootoutEmbed(player, player.pendingShootout)], components: [shootoutRow(userId)] };
+  }
   if (player.pendingMinigame) {
     const def = minigameDef(player.pendingMinigame.type);
     return { ok: true, ephemeral: false, embeds: [minigameEmbed(player, player.pendingMinigame)], components: [minigameRow(userId, def)] };
@@ -453,10 +496,10 @@ function resolveTactic(userId, tacticKey) {
     ensureFixture(player);
     if (!(player.matchdayIndex < (player.fixture || []).length)) return resolveLeagueEnd(userId, player);
     opponentName = player.fixture[player.matchdayIndex];
-  } else if (player.stage === 'copa_nacional' || player.stage === 'copa' || player.stage === 'mundial') {
+  } else if (player.stage === 'copa_nacional' || player.stage === 'copa' || player.stage === 'copa_seleccion' || player.stage === 'mundial') {
     const tournament = player.stage === 'copa_nacional'
       ? player.nationalCup
-      : (player.stage === 'copa' ? player.cup : player.worldCup);
+      : (player.stage === 'copa' ? player.cup : (player.stage === 'copa_seleccion' ? player.continentalNationalCup : player.worldCup));
     const opponent = tournament ? nextOpponent(tournament) : null;
     if (!opponent) return closeTournament(userId, player);
     opponentName = opponent.name;
@@ -559,11 +602,11 @@ function playLeagueMatch(userId, player, tacticKey, bonus) {
 function playTournamentMatch(userId, player, tacticKey, bonus) {
   const tournament = player.stage === 'copa_nacional'
     ? player.nationalCup
-    : (player.stage === 'copa' ? player.cup : player.worldCup);
+    : (player.stage === 'copa' ? player.cup : (player.stage === 'copa_seleccion' ? player.continentalNationalCup : player.worldCup));
   const opponent = nextOpponent(tournament);
   if (!opponent) return closeTournament(userId, player);
 
-  const isNational = player.stage === 'mundial';
+  const isNational = player.stage === 'mundial' || player.stage === 'copa_seleccion';
   const myTeam = isNational
     ? { name: tournament.myTeam, media: (findNation(player.nationality) || { media: 72 }).media, tier: 5 }
     : findClub(player.club);
@@ -579,6 +622,39 @@ function playTournamentMatch(userId, player, tacticKey, bonus) {
   applyMatchToPlayer(player, result, { national: isNational });
 
   const label = phaseLabel(tournament);
+
+  // Si hay empate en fase de eliminación directa (mata-mata), se juega la tanda de penales interactiva
+  if (result.myGoals === result.oppGoals && KNOCKOUT_ORDER.includes(tournament.phase)) {
+    player.pendingShootout = {
+      myGoals: result.myGoals,
+      oppGoals: result.oppGoals,
+      myScore: 0,
+      oppScore: 0,
+      round: 1,
+      maxRounds: 5,
+      history: [],
+      stage: player.stage,
+      tournamentPhase: tournament.phase,
+      tournamentName: tournament.name,
+      oppName: opponent.name
+    };
+    storage.setPlayer(userId, player);
+    const icon = player.stage === 'copa_nacional' ? '🏆' : (isNational ? '🌍' : '🌎');
+    const initialEmbed = matchEmbed(
+      `${icon} ${tournament.name} · ${label}`,
+      0xf1c40f,
+      tournament.myTeam,
+      result,
+      '⏱️ ¡Empate tras los 90 minutos! El partido se define por PENALES.'
+    );
+    return {
+      ok: true,
+      ephemeral: false,
+      embeds: [initialEmbed, shootoutEmbed(player, player.pendingShootout)],
+      components: [shootoutRow(userId)]
+    };
+  }
+
   const outcome = applyTournamentResult(tournament, result.myGoals, result.oppGoals);
 
   const icon = player.stage === 'copa_nacional' ? '🏆' : (isNational ? '🌍' : '🌎');
@@ -626,7 +702,19 @@ function closeTournament(userId, player, outcome = null) {
     const leading = outcome && outcome.text ? outcome.text : `Finalizó la ${tourney ? tourney.name : 'Copa Continental'}.`;
     player.cup = null;
     storage.setPlayer(userId, player);
-    return maybeWorldCup(userId, player, leading);
+    return maybeNationalTournament(userId, player, leading);
+  }
+
+  if (player.stage === 'copa_seleccion') {
+    const tourney = player.continentalNationalCup;
+    if (tourney && (tourney.phase === 'campeon' || (outcome && outcome.status === 'campeon'))) {
+      player.career.trophies.push(`Campeón ${tourney.name} (Temporada ${player.season})`);
+    }
+    const leading = outcome && outcome.text ? outcome.text : `Finalizó la ${tourney ? tourney.name : 'Copa Continental de Selecciones'}.`;
+    player.continentalNationalCup = null;
+    player.stage = 'liga';
+    storage.setPlayer(userId, player);
+    return finishSeasonFlow(userId, player, leading);
   }
 
   if (player.stage === 'mundial') {
@@ -715,42 +803,59 @@ function maybeContinentalCup(userId, player, leadingDesc) {
     return { ok: true, ephemeral: false, embeds: [embed], components: [continueRow(userId)] };
   }
 
-  return maybeWorldCup(userId, player, leadingDesc);
+  return maybeNationalTournament(userId, player, leadingDesc);
 }
 
-/** Después del año de club: Mundial si toca y estás convocado */
-function maybeWorldCup(userId, player, leadingDesc) {
-  const callUp = worldCupCallUp(player);
+/** Después del año de club: Copa América/Eurocopa o Mundial si toca y estás convocado */
+function maybeNationalTournament(userId, player, leadingDesc) {
+  const callUp = nationalTeamCallUp(player);
   if (!callUp.called) {
     if (callUp.reason === 'nivel') {
-      leadingDesc += `\n\n🌍 Hay Mundial esta temporada pero **no te convocaron**: necesitás media ${callUp.required} para entrar en ${callUp.nation.name} (tenés ${player.overall}).`;
+      leadingDesc += `\n\n🌍 Hay torneo de selecciones (**${callUp.cupName || 'Torneo'}**) esta temporada pero **no te convocaron**: necesitás media ${callUp.required} para entrar en ${callUp.nation.name} (tenés ${player.overall}).`;
     }
     return finishSeasonFlow(userId, player, leadingDesc);
   }
 
-  player.stage = 'mundial';
-  player.worldCup = createWorldCup(player);
-  player.injuredMatches = 0;
-  player.suspendedMatches = 0;
-  storage.setPlayer(userId, player);
+  if (callUp.type === 'mundial') {
+    player.stage = 'mundial';
+    player.worldCup = createWorldCup(player);
+    player.injuredMatches = 0;
+    player.suspendedMatches = 0;
+    storage.setPlayer(userId, player);
 
-  const embed = new EmbedBuilder()
-    .setColor(0x1abc9c)
-    .setTitle('🌍 ¡CONVOCADO AL MUNDIAL!')
-    .setDescription(
-      `${leadingDesc}\n\n**${player.name}** va al Mundial con ${nationFlag(player.worldCup.myTeam)} **${player.worldCup.myTeam}**.\n` +
-      `Grupo: ${player.worldCup.groupTeams.map(t => (t === player.worldCup.myTeam ? `**${t}**` : t)).join(' · ')}`
-    );
-  return { ok: true, ephemeral: false, embeds: [embed], components: [continueRow(userId)] };
+    const embed = new EmbedBuilder()
+      .setColor(0x1abc9c)
+      .setTitle('🌍 ¡CONVOCADO A LA COPA DEL MUNDO!')
+      .setDescription(
+        `${leadingDesc}\n\n**${player.name}** va al Mundial con ${nationFlag(player.worldCup.myTeam)} **${player.worldCup.myTeam}**.\n` +
+        `Grupo: ${player.worldCup.groupTeams.map(t => (t === player.worldCup.myTeam ? `**${t}**` : t)).join(' · ')}`
+      );
+    return { ok: true, ephemeral: false, embeds: [embed], components: [continueRow(userId)] };
+  }
+
+  if (callUp.type === 'continental') {
+    player.stage = 'copa_seleccion';
+    player.continentalNationalCup = createContinentalNationalTournament(player);
+    player.injuredMatches = 0;
+    player.suspendedMatches = 0;
+    storage.setPlayer(userId, player);
+
+    const embed = new EmbedBuilder()
+      .setColor(0x3498db)
+      .setTitle(`🌎 ¡CONVOCADO A LA ${player.continentalNationalCup.name.toUpperCase()}!`)
+      .setDescription(
+        `${leadingDesc}\n\n**${player.name}** disputará la **${player.continentalNationalCup.name}** con ${nationFlag(player.continentalNationalCup.myTeam)} **${player.continentalNationalCup.myTeam}**.\n` +
+        `Grupo: ${player.continentalNationalCup.groupTeams.map(t => (t === player.continentalNationalCup.myTeam ? `**${t}**` : t)).join(' · ')}`
+      );
+    return { ok: true, ephemeral: false, embeds: [embed], components: [continueRow(userId)] };
+  }
+
+  return finishSeasonFlow(userId, player, leadingDesc);
 }
 
 /** Cierra la temporada: progresión, premios y mercado de pases */
 function finishSeasonFlow(userId, player, leadingDesc) {
   const { development, awards } = finishSeason(player);
-
-  const event = maybePickCareerEvent();
-  player.pendingCareerEvent = event ? event.id : null;
-  storage.setPlayer(userId, player);
 
   const growthText = development.growth >= 0
     ? `📈 Media: **${player.overall}** (${development.growth >= 0 ? '+' : ''}${development.growth}) · Edad: ${player.age}`
@@ -766,8 +871,38 @@ function finishSeasonFlow(userId, player, leadingDesc) {
     .setDescription(
       `${leadingDesc}\n\n${growthText}` +
       (gainedText ? `\n${gainedText}` : '') +
-      (awards.length ? `\n\n🏅 Premios: ${awards.join(' · ')}` : '')
+      (awards.length ? `\n\n🏅 Premios: ${awards.join(' · ')}` : '') +
+      `\n\n💰 Salario anual cobrado: **${(player.salary || 50000).toLocaleString('en-US')}** · Saldo en cuenta: **${(player.bank || 0).toLocaleString('en-US')}**`
     );
+
+  // Retiro obligatorio a los 42 años o si decidió retirarse
+  if (player.retired || player.age >= 42) {
+    player.retired = true;
+    storage.setPlayer(userId, player);
+    const verdict = retirementVerdict(player);
+    const retireEmbed = new EmbedBuilder()
+      .setColor(0xf1c40f)
+      .setTitle(`👑 ¡CARRERA FINALIZADA! — ${player.name}`)
+      .setDescription(
+        `🏆 **Rango de Leyenda:** ${verdict.title}\n\n` +
+        `*"${verdict.summary}"*\n\n` +
+        `📊 **Estadísticas Finales de Carrera:**\n` +
+        `• Partidos Jugados: **${player.career.apps}**\n` +
+        `• Goles: **${player.career.goals}** · Asistencias: **${player.career.assists}**\n` +
+        `• Selección Nacional: **${player.career.caps}** PJ / **${player.career.nationalGoals}** goles\n` +
+        `• Títulos Ganados: **${player.career.trophies.length}**\n` +
+        `• Premios Individuales: **${player.career.awards.length}**\n` +
+        `• Fortuna Acumulada: **${(player.bank || 0).toLocaleString('en-US')}**\n\n` +
+        (player.career.trophies.length ? `🏆 **Títulos:**\n${player.career.trophies.slice(0, 10).map(t => `• ${t}`).join('\n')}\n\n` : '') +
+        (player.career.awards.length ? `🏅 **Premios:**\n${player.career.awards.slice(0, 10).map(a => `• ${a}`).join('\n')}\n\n` : '') +
+        `¡Gracias por escribir tu historia! Puedes iniciar una nueva aventura con \`/crear-jugador\`.`
+      );
+    return { ok: true, ephemeral: false, embeds: [embed, retireEmbed], components: [] };
+  }
+
+  const event = maybePickCareerEvent();
+  player.pendingCareerEvent = event ? event.id : null;
+  storage.setPlayer(userId, player);
 
   if (event) {
     return { ok: true, ephemeral: false, embeds: [embed, careerEventEmbed(player, event)], components: [careerEventRow(userId, event)] };
@@ -920,8 +1055,17 @@ function profileView(userId) {
   const league = getLeague(player.leagueKey);
   const stageLabel = player.stage === 'copa_nacional' ? `🏆 Copa Nacional (${player.nationalCup ? player.nationalCup.name : 'En curso'})`
     : player.stage === 'copa' ? `🌎 Copa continental (${player.cup ? player.cup.name : 'En curso'})`
+    : player.stage === 'copa_seleccion' ? `🌎 Torneo Continental (${player.continentalNationalCup ? player.continentalNationalCup.name : 'En curso'})`
     : player.stage === 'mundial' ? '🌍 Mundial de Selecciones'
     : player.stage === 'entretemporada' ? 'Mercado de pases' : 'Liga en curso';
+
+  const inventorySummary = [];
+  if (player.mansionPurchased) inventorySummary.push('🏡 Mansión Deportiva');
+  if (player.trainerPurchased) inventorySummary.push('🏋️‍♂️ Fisio VIP');
+  if (player.chefPurchased) inventorySummary.push('🥗 Chef Élite');
+  if (player.superagentPurchased) inventorySummary.push('🤝 Superagente');
+  if (player.supercarPurchased) inventorySummary.push('🏎️ Superdeportivo');
+  if (player.realEstateCount > 0) inventorySummary.push(`🏢 Negocios Inmobiliarios (x${player.realEstateCount})`);
 
   const embed = new EmbedBuilder()
     .setColor(0x3498db)
@@ -930,20 +1074,24 @@ function profileView(userId) {
     .addFields(
       { name: 'Club', value: `${league ? flagFor(league.country) : ''} ${player.club} (media ${player.clubMedia})`, inline: true },
       { name: 'Liga', value: `${league ? league.name : '—'}`, inline: true },
-      { name: 'Posicion', value: POSITIONS[player.position].label, inline: true },
-      { name: 'Edad', value: `${player.age}`, inline: true },
+      { name: 'Posición', value: POSITIONS[player.position].label, inline: true },
+      { name: 'Edad', value: `${player.age} años (Máx: 42)`, inline: true },
       { name: 'Potencial', value: `${player.potential}`, inline: true },
       { name: 'Moral', value: `${player.morale}/100`, inline: true },
-      { name: '📊 Esta temporada', value: `PJ: ${s.apps} | Goles: ${s.goals} | Asist: ${s.assists} | 🟨 ${s.yellow} | 🟥 ${s.red} | Rating: ${avg}` },
-      { name: '🏆 Carrera', value: `PJ: ${player.career.apps} | Goles: ${player.career.goals} | Asist: ${player.career.assists} | Selección: ${player.career.caps} PJ / ${player.career.nationalGoals} goles` },
-      { name: '⚡ Atributos', value: describeAttributes(player.attributes) }
+      { name: '💰 Finanzas', value: `Banco: **${(player.bank || 0).toLocaleString('en-US')}**\nSueldo: **${(player.salary || 25000).toLocaleString('en-US')}**/año`, inline: true },
+      { name: '📊 Esta temporada', value: `PJ: ${s.apps} | Goles: ${s.goals} | Asist: ${s.assists}${player.position === 'POR' ? ` | Vallas Invictas: ${s.cleanSheets || 0}` : ''} | 🟨 ${s.yellow} | 🟥 ${s.red} | Rating: ${avg}`, inline: false },
+      { name: '🏆 Carrera', value: `PJ: ${player.career.apps} | Goles: ${player.career.goals} | Asist: ${player.career.assists} | Selección: ${player.career.caps} PJ / ${player.career.nationalGoals} goles`, inline: false },
+      { name: '⚡ Atributos', value: describeAttributes(player.attributes), inline: false }
     );
 
+  if (inventorySummary.length) {
+    embed.addFields({ name: '🎒 Propiedades e Inversiones', value: inventorySummary.join(' · ') });
+  }
   if (player.career.trophies.length) {
-    embed.addFields({ name: 'Vitrina', value: player.career.trophies.map(t => `🏆 ${t}`).join('\n').slice(0, 1000) });
+    embed.addFields({ name: 'Vitrina de Títulos', value: player.career.trophies.map(t => `🏆 ${t}`).join('\n').slice(0, 1000) });
   }
   if ((player.career.awards || []).length) {
-    embed.addFields({ name: 'Premios', value: player.career.awards.map(a => `🏅 ${a}`).join('\n').slice(0, 1000) });
+    embed.addFields({ name: 'Premios Individuales', value: player.career.awards.map(a => `🏅 ${a}`).join('\n').slice(0, 1000) });
   }
 
   const components = (!player.retired && player.stage !== 'entretemporada') ? [continueRow(userId)] : [];
@@ -962,7 +1110,8 @@ function attributesView(userId) {
       `${describeAttributes(player.attributes)}\n\n` +
       (player.trainingFocus
         ? `🎯 Foco de entrenamiento: **${ATTR_LABELS[player.trainingFocus]}**`
-        : 'Sin foco de entrenamiento (te puede tocar elegirlo en una decisión de pretemporada).')
+        : 'Sin foco de entrenamiento (te puede tocar elegirlo en una decisión de pretemporada).') +
+      `\n\n💡 Usa \`/entrenar\` para mejorar habilidades específicas.`
     );
 
   const components = (!player.retired && player.stage !== 'entretemporada') ? [continueRow(userId)] : [];
@@ -989,6 +1138,14 @@ function tableView(userId) {
     return { ok: true, ephemeral: false, embeds: [embed], components: [continueRow(userId)] };
   }
 
+  if (player.stage === 'copa_seleccion' && player.continentalNationalCup) {
+    const embed = new EmbedBuilder()
+      .setColor(0x3498db)
+      .setTitle(`🌎 ${player.continentalNationalCup.name} · ${phaseLabel(player.continentalNationalCup)}`)
+      .setDescription(groupTableText(player.continentalNationalCup));
+    return { ok: true, ephemeral: false, embeds: [embed], components: [continueRow(userId)] };
+  }
+
   if (player.stage === 'mundial' && player.worldCup) {
     const embed = new EmbedBuilder()
       .setColor(0x1abc9c)
@@ -998,7 +1155,7 @@ function tableView(userId) {
   }
 
   if (player.stage !== 'liga' || !player.table || !Object.keys(player.table).length) {
-    return { ok: false, ephemeral: true, content: 'No hay una tabla de liga en curso ahora mismo (estás en copa, Mundial o mercado de pases).' };
+    return { ok: false, ephemeral: true, content: 'No hay una tabla de liga en curso ahora mismo (estás en copa, torneo de selección o mercado de pases).' };
   }
 
   const rows = standingsSorted(player.table);
@@ -1027,10 +1184,281 @@ function tableView(userId) {
   return { ok: true, ephemeral: false, embeds: [embed], components: [continueRow(userId)] };
 }
 
+function shopView(userId) {
+  const player = storage.getPlayer(userId);
+  if (!player) return noPlayer();
+
+  const embed = new EmbedBuilder()
+    .setColor(0xf39c12)
+    .setTitle(`🛒 Tienda de Inversiones & Estilo de Vida — ${player.name}`)
+    .setDescription(
+      `💰 Saldo actual en cuenta: **${(player.bank || 0).toLocaleString('en-US')}**\n` +
+      `Sueldo por temporada: **${(player.salary || 25000).toLocaleString('en-US')}**\n\n` +
+      `Invierte tus ganancias para mejorar tu longevidad, rendimiento y prestigio:`
+    );
+
+  const buttons = [];
+  for (const [key, item] of Object.entries(SHOP_ITEMS)) {
+    let owned = false;
+    if (key === 'mansion') owned = !!player.mansionPurchased;
+    else if (key === 'trainer') owned = !!player.trainerPurchased;
+    else if (key === 'chef') owned = !!player.chefPurchased;
+    else if (key === 'superagent') owned = !!player.superagentPurchased;
+    else if (key === 'supercar') owned = !!player.supercarPurchased;
+    else if (key === 'realestate') owned = (player.realEstateCount || 0) >= 10;
+
+    const priceFormatted = `${item.price.toLocaleString('en-US')}`;
+    const statusText = owned ? (key === 'realestate' ? `(Posees ${player.realEstateCount})` : '✅ Comprado') : priceFormatted;
+
+    embed.addFields({
+      name: `${item.emoji} ${item.name} · ${statusText}`,
+      value: `${item.desc}\n**Precio:** ${priceFormatted}`
+    });
+
+    if (!owned || key === 'realestate') {
+      buttons.push(
+        new ButtonBuilder()
+          .setCustomId(`shop:buy:${userId}:${key}`)
+          .setLabel(`${item.emoji} Comprar ${item.name.split(' ')[0]}`)
+          .setStyle(ButtonStyle.Primary)
+          .setDisabled((player.bank || 0) < item.price)
+      );
+    }
+  }
+
+  const rows = [];
+  while (buttons.length) {
+    rows.push(new ActionRowBuilder().addComponents(buttons.splice(0, 5)));
+  }
+
+  return { ok: true, ephemeral: false, embeds: [embed], components: rows };
+}
+
+function buyItemAction(userId, itemId) {
+  const player = storage.getPlayer(userId);
+  if (!player) return noPlayer();
+
+  const result = buyItem(player, itemId);
+  if (!result.success) {
+    return { ok: false, ephemeral: true, content: `❌ ${result.reason}` };
+  }
+
+  storage.setPlayer(userId, player);
+  return shopView(userId);
+}
+
+function trainView(userId) {
+  const player = storage.getPlayer(userId);
+  if (!player) return noPlayer();
+
+  if (player.retired) {
+    return { ok: false, ephemeral: true, content: 'Tu jugador ya se ha retirado.' };
+  }
+
+  const maxWeekly = 3;
+  const currentWeekly = player.trainingsThisWeek || 0;
+  const remaining = Math.max(0, maxWeekly - currentWeekly);
+
+  const embed = new EmbedBuilder()
+    .setColor(0x2ecc71)
+    .setTitle(`🏋️ Sesión de Entrenamiento Individual — ${player.name}`)
+    .setDescription(
+      `Media: **${player.overall}** · Potencial: **${player.potential}** · Posición: **${POSITIONS[player.position].label}**\n` +
+      `Entrenamientos disponibles esta semana: **${remaining}/${maxWeekly}**\n\n` +
+      `${describeAttributes(player.attributes)}\n\n` +
+      (remaining > 0
+        ? 'Selecciona una habilidad para entrenar intensivamente en la cancha:'
+        : '⏱️ Ya completaste tus sesiones esta semana. Juega partidos para avanzar al siguiente ciclo de entrenamientos.')
+    );
+
+  const buttons = Object.entries(ATTR_LABELS).map(([key, label]) =>
+    new ButtonBuilder()
+      .setCustomId(`train:${userId}:${key}`)
+      .setLabel(`⚡ ${label} (${player.attributes[key] || 50})`)
+      .setStyle(ButtonStyle.Primary)
+      .setDisabled(remaining <= 0 || (player.attributes[key] || 50) >= 99)
+  );
+
+  const rows = [
+    new ActionRowBuilder().addComponents(buttons.slice(0, 3)),
+    new ActionRowBuilder().addComponents(buttons.slice(3, 6))
+  ];
+
+  return { ok: true, ephemeral: false, embeds: [embed], components: rows };
+}
+
+function trainSkillAction(userId, skillKey) {
+  const player = storage.getPlayer(userId);
+  if (!player) return noPlayer();
+
+  if (player.retired) {
+    return { ok: false, ephemeral: true, content: 'Tu jugador ya se ha retirado.' };
+  }
+
+  if ((player.trainingsThisWeek || 0) >= 3) {
+    return { ok: false, ephemeral: true, content: 'Ya realizaste el máximo de 3 entrenamientos esta semana. ¡Juega partidos para avanzar la temporada!' };
+  }
+
+  const result = trainSkill(player, skillKey);
+  if (!result.success) {
+    return { ok: false, ephemeral: true, content: `❌ ${result.reason}` };
+  }
+
+  storage.setPlayer(userId, player);
+
+  const label = ATTR_LABELS[skillKey] || skillKey;
+  const feedback = result.isGreat
+    ? `🌟 **¡Sesión Brillante!** Tu ${label} subió **+${result.boost}** (Nuevo nivel: **${result.newVal}**).`
+    : `💪 **¡Buen Trabajo!** Tu ${label} subió **+${result.boost}** (Nuevo nivel: **${result.newVal}**).`;
+
+  const updatedView = trainView(userId);
+  updatedView.content = `${feedback}${result.ovrChanged ? ` 📈 ¡Tu media general subió a **${result.newOverall}**!` : ''}`;
+  return updatedView;
+}
+
+function awardsView(userId) {
+  const player = storage.getPlayer(userId);
+  if (!player) return noPlayer();
+
+  const embed = new EmbedBuilder()
+    .setColor(0xf1c40f)
+    .setTitle(`🏆 Palmarés & Premios — ${player.name}`)
+    .setDescription(`Trayectoria de ${player.career.apps} partidos disputados y ${player.career.goals} goles anotados.`);
+
+  if (player.career.trophies.length) {
+    embed.addFields({
+      name: `🏆 Títulos Colectivos (${player.career.trophies.length})`,
+      value: player.career.trophies.map(t => `• ${t}`).join('\n').slice(0, 1024)
+    });
+  } else {
+    embed.addFields({ name: '🏆 Títulos Colectivos', value: 'Aún no has levantado trofeos con tus clubes o selección.' });
+  }
+
+  if ((player.career.awards || []).length) {
+    embed.addFields({
+      name: `🏅 Premios Individuales (${player.career.awards.length})`,
+      value: player.career.awards.map(a => `• ${a}`).join('\n').slice(0, 1024)
+    });
+  } else {
+    embed.addFields({ name: '🏅 Premios Individuales', value: 'Sigue brillando en los partidos para ganar el Balón de Oro, Bota de Oro o Trofeo Yashin.' });
+  }
+
+  const components = (!player.retired && player.stage !== 'entretemporada') ? [continueRow(userId)] : [];
+  return { ok: true, ephemeral: false, embeds: [embed], components };
+}
+
+function resolveShootoutKick(userId, choiceIndex) {
+  const player = storage.getPlayer(userId);
+  if (!player) return noPlayer();
+  if (!player.pendingShootout) {
+    return { ok: false, ephemeral: true, content: 'No hay tanda de penales activa.' };
+  }
+
+  const pending = player.pendingShootout;
+  const picked = Number(choiceIndex);
+  const isGoalkeeper = player.position === 'POR';
+  const oppChoice = rand(0, 2);
+
+  let myRoundGoal = false;
+  let oppRoundGoal = false;
+
+  if (isGoalkeeper) {
+    const defAttr = (player.attributes && (player.attributes.defensa || player.attributes.fisico)) || 50;
+    if (picked === oppChoice) {
+      const saveChance = Math.min(0.85, 0.45 + defAttr / 150);
+      oppRoundGoal = Math.random() > saveChance;
+    } else {
+      oppRoundGoal = Math.random() < 0.85;
+    }
+    myRoundGoal = Math.random() < 0.75;
+  } else {
+    const shootAttr = (player.attributes && (player.attributes.tiro || player.attributes.regate)) || 50;
+    if (picked === oppChoice) {
+      const scoreChance = Math.min(0.70, 0.25 + shootAttr / 180);
+      myRoundGoal = Math.random() < scoreChance;
+    } else {
+      myRoundGoal = Math.random() < 0.90;
+    }
+    oppRoundGoal = Math.random() < 0.75;
+  }
+
+  if (myRoundGoal) pending.myScore += 1;
+  if (oppRoundGoal) pending.oppScore += 1;
+
+  pending.history.push(
+    `Penal ${pending.round}: ${myTeamName(player)} ${myRoundGoal ? '⚽ Gol' : '❌ Erraron'} · ${pending.oppName} ${oppRoundGoal ? '⚽ Gol' : '❌ Erraron'}`
+  );
+
+  pending.round += 1;
+
+  const roundsPlayed = pending.round - 1;
+  let finished = false;
+  let won = false;
+
+  if (roundsPlayed >= pending.maxRounds) {
+    if (pending.myScore !== pending.oppScore) {
+      finished = true;
+      won = pending.myScore > pending.oppScore;
+    }
+  } else {
+    const remaining = pending.maxRounds - roundsPlayed;
+    if (pending.myScore > pending.oppScore + remaining) {
+      finished = true;
+      won = true;
+    } else if (pending.oppScore > pending.myScore + remaining) {
+      finished = true;
+      won = false;
+    }
+  }
+
+  if (!finished) {
+    storage.setPlayer(userId, player);
+    return {
+      ok: true,
+      ephemeral: false,
+      embeds: [shootoutEmbed(player, pending)],
+      components: [shootoutRow(userId)]
+    };
+  }
+
+  const tournament = player.stage === 'copa_nacional'
+    ? player.nationalCup
+    : (player.stage === 'copa' ? player.cup : (player.stage === 'copa_seleccion' ? player.continentalNationalCup : player.worldCup));
+
+  const penaltiesSummary = `\n🎯 Definición por penales: **${pending.myScore} - ${pending.oppScore}** (${won ? 'Ganó ' + myTeamName(player) : 'Ganó ' + pending.oppName}).`;
+  player.pendingShootout = null;
+
+  if (!tournament) {
+    storage.setPlayer(userId, player);
+    return finishSeasonFlow(userId, player, penaltiesSummary);
+  }
+
+  const outcome = finalizeShootout(tournament, won, penaltiesSummary);
+
+  const embed = new EmbedBuilder()
+    .setColor(won ? 0x2ecc71 : 0xe74c3c)
+    .setTitle(`🎯 Final de los penales · ${pending.tournamentName}`)
+    .setDescription(
+      `**Resultado final: ${myTeamName(player)} ${pending.myScore} - ${pending.oppScore} ${pending.oppName}**\n\n` +
+      pending.history.join('\n') + `\n\n${outcome.text || ''}`
+    );
+
+  storage.setPlayer(userId, player);
+
+  if (outcome.status === 'continue') {
+    return { ok: true, ephemeral: false, embeds: [embed], components: [continueRow(userId)] };
+  }
+
+  const closing = closeTournament(userId, player, outcome);
+  closing.embeds = [embed, ...(closing.embeds || [])];
+  return closing;
+}
+
 module.exports = {
   simulateStep,
   resolveTactic,
   resolveMinigameChoice,
+  resolveShootoutKick,
   resolveMomento,
   resolveCareerEvent,
   performTransfer,
@@ -1038,7 +1466,14 @@ module.exports = {
   profileView,
   attributesView,
   tableView,
+  shopView,
+  buyItemAction,
+  trainView,
+  trainSkillAction,
+  awardsView,
   continueRow,
+  shootoutRow,
+  shootoutEmbed,
   offersRows,
   offersEmbed,
   flagFor,
