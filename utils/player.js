@@ -51,10 +51,13 @@ function newPlayer({ name, position, nationalityLeagueKey }) {
     roundSchedule: [],
     leagueClubs: [],
     injuredMatches: 0,
-    stage: 'liga', // 'liga' | 'copa' | 'mundial' | 'entretemporada'
+    suspendedMatches: 0,
+    stage: 'liga', // 'liga' | 'copa_nacional' | 'copa' | 'mundial' | 'entretemporada'
     table: {},
+    nationalCup: null,
     cup: null,
     worldCup: null,
+    qualifiedContinentalCup: null,
     seasonStats: emptySeasonStats(),
     career: {
       apps: 0,
@@ -122,8 +125,10 @@ function normalizePlayer(player) {
   }
 
   if (!player.stage) player.stage = 'liga';
+  if (player.nationalCup === undefined) player.nationalCup = null;
   if (player.cup === undefined) player.cup = null;
   if (player.worldCup === undefined) player.worldCup = null;
+  if (player.qualifiedContinentalCup === undefined) player.qualifiedContinentalCup = null;
   if (player.pendingMinigame === undefined) player.pendingMinigame = null;
   if (player.pendingMomento === undefined) player.pendingMomento = null;
   if (player.pendingCareerEvent === undefined) player.pendingCareerEvent = null;
@@ -133,6 +138,7 @@ function normalizePlayer(player) {
   if (!Array.isArray(player.roundSchedule)) player.roundSchedule = [];
   if (!player.table || typeof player.table !== 'object') player.table = {};
   if (typeof player.injuredMatches !== 'number') player.injuredMatches = 0;
+  if (typeof player.suspendedMatches !== 'number') player.suspendedMatches = 0;
   if (typeof player.extraOffers !== 'number') player.extraOffers = 0;
   if (!player.nationality) {
     const league = getLeague(player.leagueKey);
@@ -320,4 +326,6 @@ module.exports = {
   startingClub,
   reputation,
   seasonAwards
+};
+
 };
