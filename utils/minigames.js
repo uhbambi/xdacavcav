@@ -103,6 +103,53 @@ const MINIGAMES = {
   },
 
   // ──────────────────────── JUGADORES DE CAMPO ────────────────────────
+  barrida_salvadora: {
+    title: '🦵 ¡Se te escapa el delantero!',
+    prompt: (ctx) => `Minuto ${ctx.minute}': un jugador de ${ctx.opponent} se te fue por la espalda y va directo al arco. Es tu última chance de frenarlo.`,
+    attr: 'defensa',
+    reward: 'atajada',
+    options: [
+      { label: 'Barrida limpia por atrás', emoji: '🦵' },
+      { label: 'Cortar el pase antes del remate', emoji: '✋' },
+      { label: 'Empujarlo hacia la línea de fondo', emoji: '🧱' }
+    ],
+    win: (p) => `🦵 ¡Salvada heroica de **${p.name}**! Le saca la pelota justo antes del remate.`,
+    lucky: (p) => `🦵 Llegó justo, rozó la pelota y la mandó al córner. Salvada in extremis de **${p.name}**.`,
+    lose: (p) => `⚽ **${p.name}** no llega y el delantero define solo. Gol rival.`,
+    unlucky: (p) => `🟨 **${p.name}** llega tarde, lo derriba y el árbitro cobra tarjeta — pero al menos no fue penal.`
+  },
+  rabona_chilena: {
+    title: '🎩 ¡Jugada de riesgo!',
+    prompt: (ctx) => `Minuto ${ctx.minute}': te llega una pelota complicada en el área de ${ctx.opponent}. Podés resolverla fácil o ir por algo espectacular.`,
+    attr: 'regate',
+    reward: 'gol',
+    difficulty: 1,
+    options: [
+      { label: 'Rabona al primer palo', emoji: '🎩' },
+      { label: 'Chilena de espaldas al arco', emoji: '🤸' },
+      { label: 'Control y remate simple (menos vistoso)', emoji: '👟' }
+    ],
+    win: (p) => `🎩✨ ¡GOLAZO de **${p.name}**! La jugada del año, se va a repetir en todos lados.`,
+    lucky: (p) => `🎩 Le erró al golpe perfecto pero la pelota se desvió y entró igual. ¡Gol de fantasía de **${p.name}**!`,
+    lose: (p) => `😬 **${p.name}** se la juega, pero la jugada de riesgo no le sale — pelota afuera y algo de silbidos.`,
+    unlucky: (p) => `😬 Casi la clava, pero el intento espectacular se fue apenas desviado. Qué lástima.`
+  },
+  doble_gambeta: {
+    title: '⚡ Doble gambeta en el área',
+    prompt: (ctx) => `Minuto ${ctx.minute}': recibís de espaldas con DOS defensores de ${ctx.opponent} encima. Hay que sacarse a los dos.`,
+    attr: 'regate',
+    reward: 'gol',
+    difficulty: 1,
+    options: [
+      { label: 'Doble amague y arranque', emoji: '🌀' },
+      { label: 'Túnel al primero, pique al segundo', emoji: '🕳️' },
+      { label: 'Cambio de ritmo seco', emoji: '⚡' }
+    ],
+    win: (p) => `⚡ **${p.name}** se saca a los dos de una y define. ¡GOL de fantasía!`,
+    lucky: (p) => `⚡ Los defensores se enredaron entre ellos y **${p.name}** aprovechó igual. ¡Gol!`,
+    lose: (p) => `🚫 Uno de los dos defensores le saca la pelota a **${p.name}** en el segundo amague.`,
+    unlucky: (p) => `😖 Se sacó a los dos pero llegó apurado y definió apenas desviado.`
+  },
   penal: {
     title: '🥅 ¡PENAL a favor!',
     prompt: (ctx) => `Minuto ${ctx.minute}': cobran penal para **${ctx.club}** contra ${ctx.opponent}. Agarrás la pelota vos. ¿Dónde la ponés?`,
@@ -284,12 +331,12 @@ function poolFor(position, isFinal = false) {
   }
 
   if (position === 'DEF') {
-    return ['cabezazo', 'corte_defensivo_extremo', 'centro_area', 'penal'];
+    return ['cabezazo', 'corte_defensivo_extremo', 'barrida_salvadora', 'centro_area', 'penal'];
   }
   if (position === 'MED') {
-    return ['tiro_libre', 'pase_filtrado_magico', 'bombazo_larga_distancia', 'centro_area', 'gambeta_desequilibrante', 'penal'];
+    return ['tiro_libre', 'pase_filtrado_magico', 'bombazo_larga_distancia', 'centro_area', 'gambeta_desequilibrante', 'doble_gambeta', 'penal'];
   }
-  return ['mano_a_mano', 'penal', 'tiro_libre', 'gambeta_desequilibrante', 'bombazo_larga_distancia', 'cabezazo'];
+  return ['mano_a_mano', 'penal', 'tiro_libre', 'gambeta_desequilibrante', 'bombazo_larga_distancia', 'cabezazo', 'doble_gambeta', 'rabona_chilena'];
 }
 
 /**
@@ -323,14 +370,15 @@ function resolveMinigame(player, pending, choiceIndex) {
   if (!def) return { success: false, reward: null, text: 'La jugada se diluyó.', moraleDelta: 0 };
 
   const attrValue = (player.attributes && player.attributes[def.attr]) || 50;
+  const difficulty = def.difficulty || 0;
   const picked = Number(choiceIndex);
   const guessedRight = picked === pending.winningIndex;
 
   let success;
   let text;
   if (guessedRight) {
-    // Si es final es más exigente
-    const baseMiss = pending.isFinal ? 0.48 : 0.40;
+    // Si es final o jugada compleja es más exigente
+    const baseMiss = (pending.isFinal ? 0.48 : 0.40) + difficulty * 0.12;
     const missChance = Math.max(0.04, baseMiss - attrValue / 170);
     if (Math.random() < missChance) {
       success = false;
@@ -340,9 +388,9 @@ function resolveMinigame(player, pending, choiceIndex) {
       text = def.win(player, pending);
     }
   } else {
-    // Si elegiste mal, con mucho atributo podés salvarla pero en finales es muy difícil
+    // Si elegiste mal, con mucho atributo podés salvarla pero en finales/lujos es muy difícil
     const divisor = pending.isFinal ? 500 : 380;
-    const luckyChance = Math.max(0.01, attrValue / divisor);
+    const luckyChance = Math.max(0.01, attrValue / divisor - difficulty * 0.03);
     if (Math.random() < luckyChance) {
       success = true;
       text = def.lucky(player, pending);
