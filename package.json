@@ -1,0 +1,21 @@
+{
+  "name": "idolo-copero-bot",
+  "version": "1.0.0",
+  "description": "Bot de Discord tipo 'El Idolo / El Copero' - simulador de carrera de futbolista con 392 clubes, divisiones A y B, copas con fase de grupos, Mundial, atributos tipo FIFA y minijuegos de botones",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "dev": "node server.js",
+    "start": "node server.js",
+    "build": "node -e \"console.log('Build complete')\"",
+    "bot": "node index.js",
+    "deploy": "node deploy-commands.js",
+    "smoke": "node scripts/smoke-career.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "discord.js": "^14.15.3",
+    "dotenv": "^16.4.5",
+    "express": "^5.2.1"
+  }
+}

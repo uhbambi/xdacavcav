@@ -1,0 +1,6 @@
+{
+  "name": "Ídolo Copero - Simulador de Carrera de Fútbol",
+  "description": "Simulador interactivo de carrera futbolística con 392 clubes, divisiones A y B, copas continentales, Mundial, atributos FIFA y decisiones de carrera.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
