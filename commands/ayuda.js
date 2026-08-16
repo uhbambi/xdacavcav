@@ -14,6 +14,7 @@ module.exports = {
       .setDescription(
         '**/crear-jugador** — Crea tu jugador eligiendo nombre, posición (DEL, MC, DEF, POR) y país. Arrancas a los 17 años en el ascenso.\n\n' +
         '**/simular** — Juega tu próximo partido con tácticas, minijuegos y decisiones interactivas.\n\n' +
+        '**/simular-temporada** — Simula una temporada completa de tu carrera de forma rápida y realista con resumen de títulos, premios y mercado.\n\n' +
         '**/entrenar** — Sesión de entrenamiento semanal para subir atributos clave (Ritmo, Tiro, Pase, Regate, Defensa, Físico).\n\n' +
         '**/tienda** — Compra mansiones deportivas, preparadores VIP, chefs, superagentes y negocios con tus sueldos acumulados.\n\n' +
         '**/premios** — Revisa tu vitrina de títulos y distinciones individuales (Balón de Oro, The Best, Golden Boy, Trofeo Yashin, etc.).\n\n' +
@@ -29,5 +30,4 @@ module.exports = {
     await interaction.reply({ embeds: [embed] });
   }
 };
-
 
