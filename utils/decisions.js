@@ -229,6 +229,64 @@ const EVENTOS_CARRERA = [
     ]
   },
   {
+    id: 'oferta_arabia',
+    text: (p) => `🇸🇦 Un club de Arabia Saudí te presenta una oferta astronómica: ¡**$${Math.round((p.salary || 50000) * 3.5).toLocaleString('en-US')}**/año más premios por gol!`,
+    options: [
+      {
+        label: '💰 Aceptar la oferta millonaria (+350% salario)',
+        effect: { morale: -2, attr: { ritmo: -1, pase: 1 }, salaryMultiplier: 3.5, bankBonus: 500000 },
+        resultText: 'Firmaste en Arabia. Tu cuenta bancaria estalla de millones y eres el rey del vestuario: ¡Salario multiplicado x3.5 y $500,000 de prima de fichaje!'
+      },
+      {
+        label: '⚖️ Negociar aumento en tu club actual',
+        effect: { morale: 4, attr: { fisico: 1 }, salaryMultiplier: 1.25 },
+        resultText: 'Tu club actual te mejoró el contrato un +25% para no perderte. Te quedas como ídolo.'
+      },
+      {
+        label: '❌ Rechazar por competir en la élite',
+        effect: { morale: 6, potential: 2 },
+        resultText: 'Rechazaste los petrodólares. La prensa internacional y la hinchada aplauden tu lealtad competitiva: +2 Potencial, +6 Moral.'
+      }
+    ]
+  },
+  {
+    id: 'inversion_negocios',
+    text: (p) => `Tienes suficiente capital acumulado ($${(p.bank || 50000).toLocaleString('en-US')}). Un socio te propone invertir en un proyecto extra-futbolístico.`,
+    options: [
+      {
+        label: '🏢 Abrir cadena de restaurantes y marca de ropa',
+        effect: { morale: 4, bankBonus: 120000 },
+        resultText: 'Tu marca personal es un éxito rotundo fuera de la cancha: +$120,000 en dividendos y mayor fama.'
+      },
+      {
+        label: '🏎️ Comprar superdeportivos y mansión de lujo',
+        effect: { morale: 8, attr: { regate: 1 } },
+        resultText: 'Vives la vida de estrella al 100%. Llegas al entreno en Ferrari con la moral por las nubes.'
+      },
+      {
+        label: '🏟️ Fundar academia de fútbol formativo para niños',
+        effect: { morale: 6, potential: 1, attr: { vision: 1 } },
+        resultText: 'Creaste tu propia escuela de fútbol: respeto unánime de la sociedad y madurez deportiva.'
+      }
+    ]
+  },
+  {
+    id: 'cambio_dt_club',
+    text: (p) => `Renunció el cuerpo técnico de **${p.club}**. Llega un nuevo DT con una pizarra muy exigente.`,
+    options: [
+      {
+        label: '✅ Adaptarte a su esquema táctico',
+        effect: { morale: 3, attr: { pase: 2, defensa: 1 } },
+        resultText: 'Te ganaste la titularidad indiscutida con el nuevo DT: +2 Pase, +1 Defensa.'
+      },
+      {
+        label: '⚠️ Pedir traspaso si no te garantiza minutos',
+        effect: { morale: -2, extraOffers: 3 },
+        resultText: 'Tu representante activó contactos y consiguió 3 sondeos de clubes importantes.'
+      }
+    ]
+  },
+  {
     id: 'academia',
     text: () => 'Te invitan a pasar la pretemporada en la academia de un club top de Europa.',
     options: [
@@ -288,6 +346,16 @@ function applyEffect(player, effect) {
 
   if (effect.saudiOffer) {
     player.saudiOffer = true;
+  }
+
+  if (typeof effect.salaryMultiplier === 'number') {
+    player.salary = Math.round((player.salary || 50000) * effect.salaryMultiplier);
+    notes.push(`Nuevo salario: $${player.salary.toLocaleString('en-US')}/año`);
+  }
+
+  if (typeof effect.bankBonus === 'number') {
+    player.bank = (player.bank || 0) + effect.bankBonus;
+    notes.push(`Banco: +$${effect.bankBonus.toLocaleString('en-US')}`);
   }
 
   if (typeof effect.capsBoost === 'number') {
