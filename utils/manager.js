@@ -983,6 +983,117 @@ function generatePressConference(manager, opponentName, result, myGoals, oppGoal
   };
 }
 
+/**
+ * Calcula el veredicto y rango histórico de un Director Técnico al retirarse
+ */
+function getManagerRetirementVerdict(manager) {
+  const records = manager.records || { matches: 0, wins: 0, draws: 0, losses: 0, trophies: [] };
+  const totalMatches = records.matches || 0;
+  const wins = records.wins || 0;
+  const draws = records.draws || 0;
+  const losses = records.losses || 0;
+  const trophies = (records.trophies || []).length;
+  const winRate = totalMatches > 0 ? Math.round((wins / totalMatches) * 100) : 0;
+  const reputation = manager.reputation || 50;
+
+  let score = trophies * 350 + wins * 25 + draws * 8 + reputation * 10;
+  let titulo = 'Paso Fugaz por la Dirección Técnica';
+  let tier = 'Bronce';
+  let emoji = '📋';
+
+  if (trophies >= 8 || score >= 4000) {
+    titulo = 'Leyenda Inmortal de los Banquillos (Hall of Fame)';
+    tier = 'Inmortal';
+    emoji = '👑';
+  } else if (trophies >= 5 || score >= 2500) {
+    titulo = 'Estratega Galáctico y Maestro Táctico';
+    tier = 'Diamante';
+    emoji = '⭐';
+  } else if (trophies >= 3 || score >= 1500) {
+    titulo = 'Director Técnico Consagrado y Campeón';
+    tier = 'Oro';
+    emoji = '🏆';
+  } else if (trophies >= 1 || winRate >= 50 || score >= 800) {
+    titulo = 'Especialista en Éxitos y Resultados';
+    tier = 'Plata';
+    emoji = '🥈';
+  } else if (totalMatches >= 15) {
+    titulo = 'Técnico de Oficio y Batalla';
+    tier = 'Bronce';
+    emoji = '🥉';
+  }
+
+  return {
+    titulo,
+    tier,
+    emoji,
+    score,
+    matches: totalMatches,
+    wins,
+    draws,
+    losses,
+    winRate,
+    trophies: records.trophies || [],
+    trophiesCount: trophies,
+    clubsManaged: manager.careerClubs || [manager.club],
+    reputation
+  };
+}
+
+/**
+ * Retira a un Director Técnico formalmente
+ */
+function retireManager(manager) {
+  const verdict = getManagerRetirementVerdict(manager);
+  manager.retired = true;
+  manager.retiredAt = Date.now();
+  manager.verdict = verdict;
+  return verdict;
+}
+
+/**
+ * Simula una temporada completa de liga en Modo DT
+ */
+function simulateEntireDTSeason(manager) {
+  if (manager.retired) {
+    return { ok: false, message: 'Este Director Técnico ya está retirado.' };
+  }
+
+  ensureDTFixture(manager);
+  const totalFechas = manager.matchdayTotal || 16;
+  const matchesSimulated = [];
+
+  while (manager.matchdayIndex < totalFechas) {
+    const opp = ensureDTFixture(manager);
+    const res = simulateDTMatch(manager, opp);
+    matchesSimulated.push(res);
+  }
+
+  // Al finalizar la temporada, generamos ofertas para el nuevo periodo
+  manager.jobOffers = generateManagerOffers(manager);
+  
+  const sortedTable = dtTableSorted(manager.table || []);
+  const myPosition = sortedTable.findIndex(t => t.club === manager.club) + 1;
+  const isChampion = myPosition === 1;
+
+  return {
+    ok: true,
+    season: manager.season,
+    matchesPlayed: matchesSimulated.length,
+    position: myPosition,
+    totalClubs: sortedTable.length,
+    isChampion,
+    trophyWon: isChampion ? `Campeón de ${manager.leagueName}` : null,
+    table: sortedTable,
+    offers: manager.jobOffers,
+    records: manager.records,
+    seasonStats: manager.seasonStats,
+    boardConfidence: manager.boardConfidence,
+    fanConfidence: manager.fanConfidence,
+    budget: manager.budget
+  };
+}
+
 module.exports = {
   FORMATIONS,
   TACTICAL_STYLES,
@@ -997,6 +1108,10 @@ module.exports = {
   advanceDTLeague,
   dtTableSorted,
   generateManagerOffers,
-  acceptManagerJobOffer
+  acceptManagerJobOffer,
+  getManagerRetirementVerdict,
+  retireManager,
+  simulateEntireDTSeason
 };
+
 
