@@ -68,37 +68,42 @@ const OBJECTIVES_TEMPLATES = [
 ];
 
 function generateSeasonObjective(player, league) {
-  const selectedCount = Math.random() < 0.5 ? 1 : 2;
-  const selected = [];
+  const template = pick(OBJECTIVES_TEMPLATES);
+  const textStr = typeof template.text === 'function' ? template.text(player, league) : String(template.text || '');
+  const rewardStr = typeof template.rewardText === 'function' ? template.rewardText(player) : String(template.rewardText || '');
   
-  for (let i = 0; i < selectedCount; i++) {
-    const template = pick(OBJECTIVES_TEMPLATES);
-    selected.push({
-      id: template.id,
-      text: template.text(player, league),
-      check: template.check,
-      salaryBonus: template.salaryBonus,
-      moraleBonus: template.moraleBonus,
-      penaltyMorale: template.penaltyMorale || -2,
-      rewardText: template.rewardText
-    });
-  }
-  
-  return selected;
+  return {
+    id: template.id,
+    text: textStr,
+    salaryBonus: template.salaryBonus,
+    moraleBonus: template.moraleBonus,
+    penaltyMorale: template.penaltyMorale || -2,
+    rewardText: rewardStr
+  };
 }
 
 function checkObjectivesCompletion(player, objectives, table, position) {
-  if (!objectives || !Array.isArray(objectives)) return { completed: [], failed: [] };
+  if (!objectives) return { completed: [], failed: [] };
+  const list = Array.isArray(objectives) ? objectives : [objectives];
   
   const completed = [];
   const failed = [];
   const total = table ? table.length : 20;
   const stats = player.seasonStats || {};
   
-  for (const obj of objectives) {
-    const result = obj.check(player, table, position, total, stats.goals, stats.assists, stats.cleanSheets);
+  for (const obj of list) {
+    const template = OBJECTIVES_TEMPLATES.find(t => t.id === obj.id);
+    let isSuccess = false;
+
+    if (template && typeof template.check === 'function') {
+      isSuccess = !!template.check(player, table, position, total, stats.goals, stats.assists, stats.cleanSheets);
+    } else if (typeof obj.check === 'function') {
+      isSuccess = !!obj.check(player, table, position, total, stats.goals, stats.assists, stats.cleanSheets);
+    } else {
+      isSuccess = true;
+    }
     
-    if (result) {
+    if (isSuccess) {
       completed.push(obj);
     } else {
       failed.push(obj);
@@ -109,29 +114,31 @@ function checkObjectivesCompletion(player, objectives, table, position) {
 }
 
 function applyObjectiveRewards(player, objectives) {
-  if (!objectives || !Array.isArray(objectives)) return { salary: 0, morale: 0 };
+  if (!objectives) return { salary: 0, morale: 0 };
+  const list = Array.isArray(objectives) ? objectives : [objectives];
   
   let salaryMultiplier = 1.0;
   let moraleBonus = 0;
   
-  for (const obj of objectives) {
-    salaryMultiplier *= obj.salaryBonus;
-    moraleBonus += obj.moraleBonus;
+  for (const obj of list) {
+    salaryMultiplier *= (obj.salaryBonus || 1.1);
+    moraleBonus += (obj.moraleBonus || 5);
   }
   
-  player.salary = Math.round(player.salary * salaryMultiplier);
+  player.salary = Math.round((player.salary || 50000) * salaryMultiplier);
   player.morale = Math.min(100, (player.morale || 70) + moraleBonus);
   
   return { salaryMultiplier, moraleBonus };
 }
 
 function applyObjectivePenalties(player, failed) {
-  if (!failed || !Array.isArray(failed)) return { morale: 0 };
+  if (!failed) return { morale: 0 };
+  const list = Array.isArray(failed) ? failed : [failed];
   
   let moralePenalty = 0;
   
-  for (const obj of failed) {
-    moralePenalty += obj.penaltyMorale;
+  for (const obj of list) {
+    moralePenalty += (obj.penaltyMorale || -2);
   }
   
   player.morale = Math.max(10, (player.morale || 70) + moralePenalty);
@@ -139,10 +146,18 @@ function applyObjectivePenalties(player, failed) {
   return { moralePenalty };
 }
 
+function checkSeasonObjective(player, objectiveOrList, table, position) {
+  if (!objectiveOrList) return false;
+  const res = checkObjectivesCompletion(player, objectiveOrList, table, position);
+  return res.completed.length > 0;
+}
+
+
 module.exports = {
   OBJECTIVES_TEMPLATES,
   generateSeasonObjective,
   checkObjectivesCompletion,
+  checkSeasonObjective,
   applyObjectiveRewards,
   applyObjectivePenalties
 };
