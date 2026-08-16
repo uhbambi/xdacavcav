@@ -12,6 +12,11 @@ module.exports = {
       .setColor(0x1abc9c)
       .setTitle('⚽ El Ídolo Copero — Guía y Comandos')
       .setDescription(
+        '**/dt** — **Modo Director Técnico (DT)**: Crea tu carrera como DT (`/dt crear`), gestiona tu plantilla (`/dt panel`) y dirige partidos (`/dt simular`).\n\n' +
+        '**/alineacion** — Modifica tu esquema táctico en Modo DT (4-3-3, 4-4-2, 4-2-3-1, 3-5-2, 5-3-2, 3-4-3) con impacto en química de equipo.\n\n' +
+        '**/votar-ballon-dor** — Gala comunitaria del Balón de Oro (`abrir`, `votar`, `gala`). ¡La comunidad vota con 🥇 Oro, 🥈 Plata y 🥉 Bronce!\n\n' +
+        '**/clasicos** — Consulta miles de clásicos históricos, derbis y rivalidades con bonus de rating, moral y cánticos.\n\n' +
+        '**/rivalidades** — Consulta rivalidades directas Head-to-Head con otros jugadores del servidor.\n\n' +
         '**/crear-jugador** — Crea tu jugador eligiendo nombre, posición (DEL, MC, DEF, POR) y país. Arrancas a los 17 años en el ascenso.\n\n' +
         '**/simular** — Juega tu próximo partido con tácticas, minijuegos y decisiones interactivas.\n\n' +
         '**/simular-temporada** — Simula una temporada completa de tu carrera de forma rápida y realista con resumen de títulos, premios y mercado.\n\n' +
