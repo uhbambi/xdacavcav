@@ -110,7 +110,7 @@ function simulateMatch(player, club, opponentClub, tacticKey = 'equilibrado', op
     oppGoals = Math.max(0, oppGoals - 1);
   }
 
-  const pos = POSITIONS[player.position];
+  const pos = POSITIONS[player.position] || POSITIONS.DEL;
   const events = [];
 
   let playerGoals = 0;
