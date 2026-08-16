@@ -1,157 +1,115 @@
 'use strict';
 
+const { rand } = require('./simulation.js');
+
 /**
- * Sistema de Racha de Partidos
- * 
- * Mantiene un registro de resultados recientes para dar bonus/malus
- * de moral y rendimiento cuando el jugador acumula victorias o derrotas.
+ * Sistema de Rachas de Partidos
+ * Registra victorias/derrotas consecutivas y aplica bonos/malus a moral y rating
  */
 
-const MAX_STREAK_HISTORY = 15; // Últimos 15 partidos
-
-function initializeStreak(player) {
-  if (!player.streakHistory) {
-    player.streakHistory = [];
+function initializeStreaks(player) {
+  if (!player.streaks) {
+    player.streaks = {
+      recentResults: [],
+      currentWinStreak: 0,
+      currentLossStreak: 0,
+      longestWinStreak: 0,
+      longestLossStreak: 0
+    };
   }
-  if (typeof player.currentStreak === 'undefined') {
-    player.currentStreak = 0; // 0 = sin racha, >0 = ganando, <0 = perdiendo
-  }
-  return player;
+  return player.streaks;
 }
 
-/**
- * Registra un resultado de partido y actualiza la racha
- * result: 'V' (victoria), 'D' (derrota), 'E' (empate)
- */
 function recordMatchResult(player, result) {
-  initializeStreak(player);
+  const streaks = initializeStreaks(player);
   
-  // Agregar al historial
-  player.streakHistory.push(result);
-  if (player.streakHistory.length > MAX_STREAK_HISTORY) {
-    player.streakHistory.shift();
-  }
-
-  // Contar racha actual
-  let streak = 0;
-  const recent = player.streakHistory.slice(-10); // Últimos 10 partidos max
+  streaks.recentResults.unshift(result);
   
-  if (recent.length === 0) {
-    player.currentStreak = 0;
-    return;
+  if (streaks.recentResults.length > 10) {
+    streaks.recentResults.pop();
   }
-
-  const lastResult = recent[recent.length - 1];
   
-  // Contar hacia atrás
-  for (let i = recent.length - 1; i >= 0; i--) {
-    if (recent[i] === lastResult) {
-      streak++;
-    } else {
-      break;
-    }
+  if (result === 'V') {
+    streaks.currentWinStreak = (streaks.currentWinStreak || 0) + 1;
+    streaks.currentLossStreak = 0;
+    streaks.longestWinStreak = Math.max(streaks.longestWinStreak || 0, streaks.currentWinStreak);
+  } else if (result === 'D') {
+    streaks.currentLossStreak = (streaks.currentLossStreak || 0) + 1;
+    streaks.currentWinStreak = 0;
+    streaks.longestLossStreak = Math.max(streaks.longestLossStreak || 0, streaks.currentLossStreak);
+  } else if (result === 'E') {
+    streaks.currentWinStreak = 0;
+    streaks.currentLossStreak = 0;
   }
-
-  // Positivo para victorias, negativo para derrotas, 0 para empates
-  if (lastResult === 'V') {
-    player.currentStreak = streak;
-  } else if (lastResult === 'D') {
-    player.currentStreak = -streak;
-  } else {
-    player.currentStreak = 0;
-  }
+  
+  return streaks;
 }
 
-/**
- * Calcula bonus/malus según la racha actual
- * Devuelve { ratingBonus, moraleBonus, emoji, text }
- */
 function getStreakBonuses(player) {
-  initializeStreak(player);
-
-  const streak = player.currentStreak || 0;
+  const streaks = player.streaks || initializeStreaks(player);
   let ratingBonus = 0;
   let moraleBonus = 0;
-  let emoji = '';
-  let text = '';
-
-  if (streak >= 5) {
+  
+  if (streaks.currentWinStreak >= 5) {
     ratingBonus = 0.4;
-    moraleBonus = 3;
-    emoji = '🔥🔥🔥';
-    text = `¡En RACHA EXPLOSIVA de ${streak} victorias! (Rating +0.4)`;
-  } else if (streak >= 3) {
+    moraleBonus = rand(2, 4);
+  } else if (streaks.currentWinStreak >= 3) {
     ratingBonus = 0.2;
-    moraleBonus = 2;
-    emoji = '🔥';
-    text = `En racha de ${streak} victorias (Rating +0.2)`;
-  } else if (streak === 2) {
-    ratingBonus = 0.1;
-    moraleBonus = 1;
-    emoji = '⚡';
-    text = 'Ganando seguido (Rating +0.1)';
+    moraleBonus = rand(1, 3);
   }
-
-  if (streak <= -5) {
+  
+  if (streaks.currentLossStreak >= 5) {
     ratingBonus = -0.4;
-    moraleBonus = -3;
-    emoji = '📉📉📉';
-    text = `¡En PÁNICO de ${Math.abs(streak)} derrotas! (Rating -0.4)`;
-  } else if (streak <= -3) {
+    moraleBonus = rand(-4, -2);
+  } else if (streaks.currentLossStreak >= 3) {
     ratingBonus = -0.2;
-    moraleBonus = -2;
-    emoji = '📉';
-    text = `En racha de ${Math.abs(streak)} derrotas (Rating -0.2)`;
-  } else if (streak === -2) {
-    ratingBonus = -0.1;
-    moraleBonus = -1;
-    emoji = '⚠️';
-    text = 'Perdiendo seguido (Rating -0.1)';
+    moraleBonus = rand(-3, -1);
   }
-
-  return { ratingBonus, moraleBonus, emoji, text };
+  
+  return {
+    ratingBonus,
+    moraleBonus,
+    winStreak: streaks.currentWinStreak || 0,
+    lossStreak: streaks.currentLossStreak || 0
+  };
 }
 
-/**
- * Retorna emoji visual de la racha para mostrar en /perfil
- */
 function getStreakEmoji(player) {
-  initializeStreak(player);
-  const streak = player.currentStreak || 0;
+  const streaks = player.streaks || initializeStreaks(player);
   
-  if (streak >= 5) return '🔥🔥🔥';
-  if (streak >= 3) return '🔥';
-  if (streak >= 2) return '⚡';
-  if (streak <= -5) return '📉📉📉';
-  if (streak <= -3) return '📉';
-  if (streak === -2) return '⚠️';
+  if (streaks.currentWinStreak >= 5) return '🔥🔥🔥';
+  if (streaks.currentWinStreak >= 3) return '🔥';
+  if (streaks.currentLossStreak >= 5) return '📉📉📉';
+  if (streaks.currentLossStreak >= 3) return '📉';
   return '➖';
 }
 
-/**
- * Resumen de últimos resultados para /perfil
- */
 function getRecentResults(player) {
-  initializeStreak(player);
-  if (!player.streakHistory || player.streakHistory.length === 0) {
-    return 'Sin historial de partidos';
-  }
-  
-  const recent = player.streakHistory.slice(-10);
-  const formatted = recent.map(r => {
-    if (r === 'V') return '✅';
-    if (r === 'D') return '❌';
-    return '🤝';
-  }).join(' ');
-  
-  return formatted;
+  const streaks = player.streaks || initializeStreaks(player);
+  const emojis = {
+    'V': '✅',
+    'D': '❌',
+    'E': '⚪'
+  };
+  return streaks.recentResults.map(r => emojis[r] || '?').join('');
+}
+
+function getStreakStats(player) {
+  const streaks = player.streaks || initializeStreaks(player);
+  return {
+    currentWinStreak: streaks.currentWinStreak || 0,
+    currentLossStreak: streaks.currentLossStreak || 0,
+    longestWinStreak: streaks.longestWinStreak || 0,
+    longestLossStreak: streaks.longestLossStreak || 0,
+    recentResults: streaks.recentResults || []
+  };
 }
 
 module.exports = {
-  initializeStreak,
+  initializeStreaks,
   recordMatchResult,
   getStreakBonuses,
   getStreakEmoji,
   getRecentResults,
-  MAX_STREAK_HISTORY
+  getStreakStats
 };

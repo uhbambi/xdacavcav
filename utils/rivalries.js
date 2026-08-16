@@ -1,158 +1,107 @@
 'use strict';
 
-/**
- * Sistema de Rivalidades entre Jugadores del Servidor
- * 
- * Detecta cuando dos jugadores tienen carreras activas en el mismo servidor
- * y crea una "competencia" con bonos de moral y tensión en los clásicos
- */
-
 const { rand } = require('./simulation.js');
 
 /**
- * Head-to-head: historial de enfrentamientos entre dos jugadores
- * Se guarda en: player.headToHead[rivalId] = { wins, draws, losses, goalsFor, goalsAgainst }
+ * Sistema de Rivalidades entre jugadores del mismo servidor
  */
 
 function initializeHeadToHead(player) {
   if (!player.headToHead) {
     player.headToHead = {};
   }
-  return player;
+  return player.headToHead;
 }
 
-/**
- * Registrar un enfrentamiento en clásico/mismo partido
- */
-function recordHeadToHeadMatch(player, rivalId, result, goalsFor, goalsAgainst) {
-  initializeHeadToHead(player);
-
-  if (!player.headToHead[rivalId]) {
-    player.headToHead[rivalId] = {
-      wins: 0,
-      draws: 0,
-      losses: 0,
-      goalsFor: 0,
-      goalsAgainst: 0,
-      lastMeetingDate: null
-    };
-  }
-
-  const h2h = player.headToHead[rivalId];
+function recordHeadToHeadMatch(player, rivalUserId, result, goalsFor, goalsAgainst) {
+  const h2h = initializeHeadToHead(player);
   
-  if (result === 'V') h2h.wins++;
-  else if (result === 'D') h2h.draws++;
-  else if (result === 'D') h2h.losses++;
-
-  h2h.goalsFor += goalsFor;
-  h2h.goalsAgainst += goalsAgainst;
-  h2h.lastMeetingDate = Date.now();
+  if (!h2h[rivalUserId]) {
+    h2h[rivalUserId] = { matches: 0, wins: 0, draws: 0, losses: 0, goalDiff: 0 };
+  }
+  
+  const record = h2h[rivalUserId];
+  record.matches += 1;
+  record.goalDiff += (goalsFor - goalsAgainst);
+  
+  if (result === 'V') record.wins += 1;
+  else if (result === 'E') record.draws += 1;
+  else if (result === 'D') record.losses += 1;
+  
+  return record;
 }
 
-/**
- * Obtener estadísticas H2H formateadas
- */
-function getHeadToHeadStats(player, rivalId) {
-  initializeHeadToHead(player);
-
-  if (!player.headToHead[rivalId]) {
-    return null;
-  }
-
-  const h2h = player.headToHead[rivalId];
-  const totalMatches = h2h.wins + h2h.draws + h2h.losses;
-  const winRate = totalMatches > 0 ? (h2h.wins / totalMatches * 100).toFixed(1) : 0;
-
+function getHeadToHeadStats(player, rivalUserId) {
+  const h2h = (player.headToHead || {})[rivalUserId];
+  if (!h2h) return null;
+  
   return {
-    matches: totalMatches,
+    matches: h2h.matches,
     wins: h2h.wins,
     draws: h2h.draws,
     losses: h2h.losses,
-    goalsFor: h2h.goalsFor,
-    goalsAgainst: h2h.goalsAgainst,
-    goalDiff: h2h.goalsFor - h2h.goalsAgainst,
-    winRate: parseFloat(winRate)
+    goalDiff: h2h.goalDiff,
+    winRate: h2h.matches > 0 ? Math.round((h2h.wins / h2h.matches) * 100) : 0
   };
 }
 
-/**
- * Calcular si dos jugadores están en el mismo servidor/liga/país
- * Esto determina si forman una "rivalidad automática"
- */
 function detectRivalryStatus(player1, player2) {
-  const sameLeague = player1.leagueKey === player2.leagueKey;
-  const sameCountry = player1.nationality === player2.nationality;
-  const sameClub = player1.club === player2.club;
-  const samePosition = player1.position === player2.position;
-
-  let rivalry = {
-    level: 0, // 0 = no rival, 1 = misma liga, 2 = mismo país, 3 = mismo club(!), 4 = mismo puesto
-    type: 'none',
-    intensityMultiplier: 1.0,
-    text: ''
-  };
-
-  if (sameClub) {
-    rivalry.level = 3;
-    rivalry.type = 'teammate';
-    rivalry.intensityMultiplier = 2.0;
-    rivalry.text = `¡Compañeros en ${player1.club}! Lucha interna por ser titular.`;
-  } else if (sameLeague && samePosition) {
-    rivalry.level = 2;
-    rivalry.type = 'domestic_same_position';
-    rivalry.intensityMultiplier = 1.5;
-    rivalry.text = `Rivales directos en ${player1.leagueName}: ambos ${player1.position}.`;
-  } else if (sameLeague) {
-    rivalry.level = 2;
-    rivalry.type = 'domestic';
-    rivalry.intensityMultiplier = 1.3;
-    rivalry.text = `Rivales en la misma liga: ${player1.leagueName}.`;
-  } else if (sameCountry) {
-    rivalry.level = 1;
-    rivalry.type = 'national';
-    rivalry.intensityMultiplier = 1.1;
-    rivalry.text = `Competencia nacional: ambos de ${player1.nationality}.`;
+  let level = 0;
+  let type = 'none';
+  let intensityMultiplier = 1.0;
+  let text = '';
+  
+  if (player1.club === player2.club) {
+    level = 3;
+    type = 'teammate';
+    intensityMultiplier = 2.0;
+    text = `⚔️ **Compañeros de Equipo** en ${player1.club}`;
   }
-
-  return rivalry;
+  else if (player1.position === player2.position && player1.leagueKey === player2.leagueKey) {
+    level = 2;
+    type = 'sameposition';
+    intensityMultiplier = 1.5;
+    text = `🏆 **Misma posición** en ${player1.leagueName}`;
+  }
+  else if (player1.leagueKey === player2.leagueKey) {
+    level = 2;
+    type = 'sameleague';
+    intensityMultiplier = 1.3;
+    text = `🥊 **Rival de liga** en ${player1.leagueName}`;
+  }
+  else if (player1.nationality === player2.nationality) {
+    level = 1;
+    type = 'samecountry';
+    intensityMultiplier = 1.1;
+    text = `🇦🇷 **Rival de ${player1.nationality}**`;
+  }
+  
+  return { level, type, intensityMultiplier, text };
 }
 
-/**
- * Calcular bonus de moral por rivalidad
- * Se aplica después de un clásico/enfrentamiento directo
- */
-function getRivalryMoraleBonus(result, rivalryLevel) {
+function getRivalryMoraleBonus(result, rivalLevel) {
   let bonus = 0;
-
+  const baseMultiplier = rivalLevel * 2;
+  
   if (result === 'V') {
-    if (rivalryLevel === 3) bonus = 8; // Ganar al compañero
-    else if (rivalryLevel === 2) bonus = 6; // Ganar en clásico
-    else if (rivalryLevel === 1) bonus = 3; // Ganar a rival nacional
+    bonus = rand(2, 5) * baseMultiplier;
   } else if (result === 'D') {
-    if (rivalryLevel === 3) bonus = -6;
-    else if (rivalryLevel === 2) bonus = -4;
-    else if (rivalryLevel === 1) bonus = -2;
+    bonus = rand(-5, -2) * baseMultiplier;
   }
-
+  
   return bonus;
 }
 
-/**
- * Formato visual de rivalidad para /perfil
- */
 function getRivalryBadge(player, rivalName) {
-  if (!player.rivalId) return '';
+  const h2h = player.headToHead || {};
+  const stats = Object.values(h2h)[0];
   
-  const h2h = getHeadToHeadStats(player, player.rivalId);
-  if (!h2h || h2h.matches === 0) return '';
-
-  if (h2h.wins > h2h.losses) {
-    return `⚔️ Rival: ${h2h.wins}V-${h2h.draws}E-${h2h.losses}D vs ${rivalName}`;
-  } else if (h2h.losses > h2h.wins) {
-    return `⚠️ Rival: ${h2h.wins}V-${h2h.draws}E-${h2h.losses}D vs ${rivalName} (te ganan)`;
-  } else {
-    return `🤝 Rival Paejo: ${h2h.wins}V-${h2h.draws}E-${h2h.losses}D vs ${rivalName}`;
-  }
+  if (!stats) return '';
+  
+  const record = `${stats.wins}V-${stats.draws}E-${stats.losses}D`;
+  const trend = stats.wins > stats.losses ? '(te ganamos)' : stats.losses > stats.wins ? '(nos ganas)' : '(parejos)';
+  
+  return `⚔️ **Rival:** ${record} vs ${rivalName} ${trend}`;
 }
 
 module.exports = {

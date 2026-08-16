@@ -1,163 +1,111 @@
 'use strict';
 
-/**
- * Sistema de Votación de Balón de Oro en Tiempo Real
- * 
- * Los usuarios votan con reacciones al final de cada temporada
- * El ganador recibe premios especiales y badge permanente
- */
-
-const { POSITIONS } = require('./simulation.js');
+const { pick } = require('./simulation.js');
 
 /**
- * Crear una votación de Balón de Oro para el servidor
- * Se debe invocar al cerrar cada temporada
+ * Sistema de Votación Balón de Oro
+ * Votación por reacciones del servidor (🥇 🥈 🥉)
  */
+
+function getEligibleCandidates(players, season) {
+  return players.filter(p => {
+    if (p.retired) return false;
+    if ((p.seasonStats?.apps || 0) < 5) return false;
+    if (p.season !== season) return false;
+    const avgRating = p.seasonStats.apps > 0 ? p.seasonStats.avgRatingSum / p.seasonStats.apps : 0;
+    return avgRating >= 6.5 || p.seasonStats.goals >= 5;
+  });
+}
+
 function initializeBallonDOrVote(season, candidates) {
-  // candidates = array de { userId, playerName, club, stats }
-  
   return {
     season,
-    candidates,
-    votes: {}, // userId -> votes
-    startedAt: Date.now(),
-    endsAt: Date.now() + 86400000, // 24 horas
-    status: 'active', // 'active' | 'closed' | 'decided'
-    winner: null
+    candidates: candidates.slice(0, 10).map(c => ({
+      playerId: c.userId || c.id,
+      name: c.name,
+      overall: c.overall,
+      goals: c.seasonStats?.goals || 0,
+      assists: c.seasonStats?.assists || 0,
+      apps: c.seasonStats?.apps || 0,
+      gold: 0,
+      silver: 0,
+      bronze: 0
+    })),
+    votes: {},
+    status: 'open'
   };
 }
 
-/**
- * Registrar voto con reacción
- * emoji puede ser '🥇', '🥈', '🥉'
- */
-function registerBallonDOrVote(vote, voterId, candidateUserId, emoji) {
-  if (!vote.votes[candidateUserId]) {
-    vote.votes[candidateUserId] = {
-      gold: 0,   // 🥇 = 3 puntos
-      silver: 0, // 🥈 = 2 puntos
-      bronze: 0  // 🥉 = 1 punto
-    };
-  }
-
-  if (emoji === '🥇') vote.votes[candidateUserId].gold++;
-  else if (emoji === '🥈') vote.votes[candidateUserId].silver++;
-  else if (emoji === '🥉') vote.votes[candidateUserId].bronze++;
-
-  vote.lastVote = Date.now();
+function registerVote(vote, userId, candIndex, position) {
+  if (vote.status !== 'open') return false;
+  if (!vote.votes[userId]) vote.votes[userId] = {};
+  
+  if (vote.votes[userId][position]) return false;
+  
+  const candidate = vote.candidates[candIndex];
+  if (!candidate) return false;
+  
+  if (position === 'gold') candidate.gold += 3;
+  else if (position === 'silver') candidate.silver += 2;
+  else if (position === 'bronze') candidate.bronze += 1;
+  
+  vote.votes[userId][position] = candIndex;
+  return true;
 }
 
-/**
- * Calcular puntos del Balón de Oro (sistema FIFA/Ballon d'Or)
- */
-function calculateBallonDOrScore(voteData) {
-  const score = (voteData.gold * 3) + (voteData.silver * 2) + (voteData.bronze * 1);
-  return score;
-}
-
-/**
- * Cerrar votación y determinar ganador
- */
 function closeBallonDOrVote(vote) {
   vote.status = 'closed';
-
-  let winner = null;
-  let maxScore = 0;
-
-  for (const [userId, voteData] of Object.entries(vote.votes)) {
-    const score = calculateBallonDOrScore(voteData);
-    if (score > maxScore) {
-      maxScore = score;
-      winner = userId;
-    }
-  }
-
-  vote.winner = winner;
-  vote.status = 'decided';
-  vote.finalScore = maxScore;
-
-  return { winner, score: maxScore };
+  
+  vote.candidates.sort((a, b) => {
+    const scoreA = a.gold * 5 + a.silver * 3 + a.bronze * 1;
+    const scoreB = b.gold * 5 + b.silver * 3 + b.bronze * 1;
+    return scoreB - scoreA;
+  });
+  
+  const winner = vote.candidates[0];
+  const score = winner.gold * 5 + winner.silver * 3 + winner.bronze * 1;
+  
+  return {
+    winner: winner.playerId,
+    winnerName: winner.name,
+    score,
+    all: vote.candidates
+  };
 }
 
-/**
- * Aplicar premios al ganador del Balón de Oro
- */
 function applyBallonDOrRewards(player) {
-  if (!player) return null;
-
   player.morale = Math.min(100, (player.morale || 70) + 15);
   player.attributes.ritmo = Math.min(99, (player.attributes.ritmo || 50) + 2);
   player.attributes.tiro = Math.min(99, (player.attributes.tiro || 50) + 2);
-
+  
   if (!player.career.awards) player.career.awards = [];
-  player.career.awards.push(`🏆 Balón de Oro Real (Votación del Servidor - Temporada ${player.season})`);
-
+  player.career.awards.push(`🌟 Balón de Oro (Temporada ${player.season})`);
+  
   return {
-    morale: 15,
-    attrBonus: { ritmo: 2, tiro: 2 },
-    award: player.career.awards[player.career.awards.length - 1]
+    moraleGain: 15,
+    ritmoGain: 2,
+    tiroGain: 2,
+    award: `🌟 Balón de Oro (Temporada ${player.season})`
   };
 }
 
-/**
- * Formatear resultado de votación para mostrar en Discord
- */
-function formatBallonDOrResults(vote, candidates) {
-  if (vote.status !== 'decided' || !vote.winner) {
-    return '⏳ Votación aún en curso...';
-  }
-
-  let result = `🏆 **BALÓN DE ORO - TEMPORADA ${vote.season}** 🏆\n\n`;
-
-  const ranked = Object.entries(vote.votes)
-    .map(([userId, votes]) => ({
-      userId,
-      score: calculateBallonDOrScore(votes),
-      votes
-    }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 3);
-
-  const medals = ['🥇', '🥈', '🥉'];
+function formatBallonDOrResults(vote) {
+  let text = `🏆 **Resultados Balón de Oro - Temporada ${vote.season}**\n\n`;
   
-  ranked.forEach((entry, idx) => {
-    const candidate = candidates.find(c => c.userId === entry.userId);
-    if (candidate) {
-      result += `${medals[idx]} **${candidate.playerName}** (${candidate.club})\n`;
-      result += `   Puntos: ${entry.score} (🥇×${entry.votes.gold} 🥈×${entry.votes.silver} 🥉×${entry.votes.bronze})\n\n`;
-    }
+  vote.candidates.slice(0, 5).forEach((c, i) => {
+    const score = c.gold * 5 + c.silver * 3 + c.bronze * 1;
+    const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
+    text += `${medal} **${c.name}** (${c.overall}) — ${score} puntos\n   📊 ${c.apps}PJ | ${c.goals}G | ${c.assists}A\n`;
   });
-
-  return result;
-}
-
-/**
- * Listar candidatos elegibles (jugadores con partidos jugados esa temporada)
- */
-function getEligibleCandidates(players, season) {
-  return players.filter(p => {
-    return p.season === season && 
-           p.seasonStats && 
-           p.seasonStats.apps >= 5 &&
-           !p.retired;
-  }).map(p => ({
-    userId: p.userId,
-    playerName: p.name,
-    club: p.club,
-    position: p.position,
-    apps: p.seasonStats.apps,
-    goals: p.seasonStats.goals,
-    assists: p.seasonStats.assists,
-    rating: p.seasonStats.avgRatingSum / p.seasonStats.apps || 0
-  }));
+  
+  return text;
 }
 
 module.exports = {
+  getEligibleCandidates,
   initializeBallonDOrVote,
-  registerBallonDOrVote,
-  calculateBallonDOrScore,
+  registerVote,
   closeBallonDOrVote,
   applyBallonDOrRewards,
-  formatBallonDOrResults,
-  getEligibleCandidates
+  formatBallonDOrResults
 };
