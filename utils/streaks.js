@@ -105,11 +105,24 @@ function getStreakStats(player) {
   };
 }
 
+function getStreakStatus(player) {
+  const streaks = player.streaks || initializeStreaks(player);
+  return {
+    emoji: getStreakEmoji(player),
+    currentWinStreak: streaks.currentWinStreak || 0,
+    currentLossStreak: streaks.currentLossStreak || 0,
+    longestWinStreak: streaks.longestWinStreak || 0,
+    longestLossStreak: streaks.longestLossStreak || 0,
+    recentResults: streaks.recentResults || []
+  };
+}
+
 module.exports = {
   initializeStreaks,
   recordMatchResult,
   getStreakBonuses,
   getStreakEmoji,
   getRecentResults,
-  getStreakStats
+  getStreakStats,
+  getStreakStatus
 };
