@@ -93,6 +93,8 @@ async function startBot() {
           let result;
           if (action === 'sim') {
             result = engine.simulateStep(interaction.user.id);
+          } else if (action === 'fastseason') {
+            result = engine.simulateEntireSeason(interaction.user.id);
           } else if (action === 'tactic') {
             result = engine.resolveTactic(interaction.user.id, rest.join(':'));
           } else if (action === 'mini') {
