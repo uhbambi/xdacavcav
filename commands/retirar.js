@@ -3,20 +3,28 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const storage = require('../data/storage.js');
 const { retirementVerdict } = require('../utils/player.js');
+const engine = require('../game/engine.js');
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('retirar')
-    .setDescription('Termina la carrera de tu jugador y recibe tu veredicto final'),
+    .setDescription('Termina la carrera de tu jugador o DT y recibe tu veredicto final'),
 
   async execute(interaction) {
     const player = storage.getPlayer(interaction.user.id);
-    if (!player) {
-      await interaction.reply({ content: 'Todavia no tenis jugador.', ephemeral: true });
-      return;
-    }
-    if (player.retired) {
-      await interaction.reply({ content: 'Este jugador ya esta retirado.', ephemeral: true });
+    const manager = storage.getManager(interaction.user.id);
+
+    if (!player || player.retired) {
+      if (manager && !manager.retired) {
+        const res = engine.dtRetireAction(interaction.user.id);
+        return interaction.reply({
+          content: res.content,
+          embeds: res.embeds,
+          components: res.components,
+          ephemeral: res.ephemeral
+        });
+      }
+      await interaction.reply({ content: 'No tienes una carrera activa de futbolista ni de Director Técnico para retirar.', ephemeral: true });
       return;
     }
 
