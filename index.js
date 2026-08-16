@@ -124,6 +124,22 @@ async function startBot() {
             result = engine.trainSkillAction(interaction.user.id, rest[0]);
           } else if (action === 'transfer') {
             result = engine.performTransfer(interaction.user.id, rest.join(':'));
+          } else if (action === 'dt_sim') {
+            result = engine.dtSimulateStep(interaction.user.id);
+          } else if (action === 'dt_fastseason') {
+            result = engine.dtSimulateEntireSeason(interaction.user.id);
+          } else if (action === 'dt_tabla') {
+            result = engine.dtTableView(interaction.user.id);
+            result.ephemeral = true;
+          } else if (action === 'dt_panel') {
+            result = engine.dtPanelView(interaction.user.id);
+            result.ephemeral = true;
+          } else if (action === 'dt_ofertas') {
+            result = engine.dtOffersView(interaction.user.id);
+          } else if (action === 'dt_accept') {
+            result = engine.dtAcceptOfferAction(interaction.user.id, rest[0]);
+          } else if (action === 'dt_retirar') {
+            result = engine.dtRetireAction(interaction.user.id);
           } else {
             return;
           }
