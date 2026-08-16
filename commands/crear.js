@@ -57,7 +57,16 @@ module.exports = {
     const existing = storage.getPlayer(interaction.user.id);
     if (existing && !existing.retired) {
       await interaction.reply({
-        content: `Ya tenis una carrera activa con **${existing.name}** (${existing.club}). Usa \`/retirar\` si quieres terminarla y empezar otra.`,
+        content: `Ya tienes una carrera activa como futbolista con **${existing.name}** (${existing.club}). Usa \`/retirar\` si quieres terminarla y empezar otra.`,
+        ephemeral: true
+      });
+      return;
+    }
+
+    const existingManager = storage.getManager(interaction.user.id);
+    if (existingManager && !existingManager.retired) {
+      await interaction.reply({
+        content: `⚠️ Ya tienes una carrera activa como **Director Técnico** en **${existingManager.club}**.\nNo puedes ser Jugador y DT al mismo tiempo.\nDebes retirarte como DT usando \`/dt retirar\` antes de crear una carrera como futbolista.`,
         ephemeral: true
       });
       return;
