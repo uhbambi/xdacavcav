@@ -138,8 +138,9 @@ async function startBot() {
             await interaction.update(payload);
           }
         } catch (error) {
-          console.error(`Error procesando boton ${interaction.customId}:`, error);
-          const payload = { content: 'Ocurrio un error procesando eso. Intenta de nuevo con el slash command.', ephemeral: true };
+          console.error(`❌ Error procesando botón ${interaction.customId}:`, error.stack || error);
+          const errorMsg = error?.message ? `Ocurrió un error: ${error.message}. Intenta de nuevo con el slash command.` : 'Ocurrió un error procesando eso. Intenta de nuevo con el slash command.';
+          const payload = { content: errorMsg, ephemeral: true };
           if (interaction.replied || interaction.deferred) {
             await interaction.followUp(payload);
           } else {
