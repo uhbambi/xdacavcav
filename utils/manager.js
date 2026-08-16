@@ -434,10 +434,24 @@ function simulateDTMatch(manager, opponentName, teamTalk = null, inGameTactics =
   let attackWeight = (formBonus.attack || 1.0) * (manager.mentality === 'ofensiva' ? 1.2 : manager.mentality === 'ataque_total' ? 1.35 : manager.mentality === 'defensiva' ? 0.85 : 1.0);
   let defenseWeight = (formBonus.defense || 1.0) * (manager.mentality === 'defensiva' ? 1.25 : manager.mentality === 'ultra_defensiva' ? 1.4 : manager.mentality === 'ofensiva' ? 0.9 : 1.0);
 
+  // Detección de Clásico / Rivalidad
+  let classicData = null;
+  try {
+    const { getClassicData } = require('./classics.js');
+    classicData = getClassicData(manager.club, opponentName);
+  } catch (e) {
+    classicData = null;
+  }
+
   // Cálculo de goles base
   const diff = (myRating + tacticalBoost) - oppRating;
   let myExpectedGoals = Math.max(0, 1.4 + diff * 0.08) * attackWeight;
   let oppExpectedGoals = Math.max(0, 1.2 - diff * 0.07) / defenseWeight;
+
+  if (classicData && classicData.isClassic) {
+    myExpectedGoals *= 1.1;
+    oppExpectedGoals *= 1.1;
+  }
 
   let myGoals = 0;
   let oppGoals = 0;
@@ -515,9 +529,10 @@ function simulateDTMatch(manager, opponentName, teamTalk = null, inGameTactics =
     manager.records.wins++;
     manager.seasonStats.wins++;
     manager.seasonStats.points += 3;
-    manager.boardConfidence = Math.min(100, manager.boardConfidence + rand(2, 4));
-    manager.fanConfidence = Math.min(100, manager.fanConfidence + rand(3, 5));
-    manager.reputation = Math.min(99, manager.reputation + 0.5);
+    const classicBonus = classicData?.isClassic ? 2 : 0;
+    manager.boardConfidence = Math.min(100, manager.boardConfidence + rand(2, 4) + classicBonus);
+    manager.fanConfidence = Math.min(100, manager.fanConfidence + rand(3, 5) + classicBonus);
+    manager.reputation = Math.min(99, manager.reputation + 0.5 + (classicBonus * 0.2));
     manager.recentForm.unshift('V');
   } else if (result === 'E') {
     manager.records.draws++;
@@ -528,8 +543,9 @@ function simulateDTMatch(manager, opponentName, teamTalk = null, inGameTactics =
   } else {
     manager.records.losses++;
     manager.seasonStats.losses++;
-    manager.boardConfidence = Math.max(10, manager.boardConfidence - rand(3, 6));
-    manager.fanConfidence = Math.max(10, manager.fanConfidence - rand(4, 7));
+    const classicPenalty = classicData?.isClassic ? 2 : 0;
+    manager.boardConfidence = Math.max(10, manager.boardConfidence - rand(3, 6) - classicPenalty);
+    manager.fanConfidence = Math.max(10, manager.fanConfidence - rand(4, 7) - classicPenalty);
     manager.recentForm.unshift('D');
   }
 
@@ -542,6 +558,21 @@ function simulateDTMatch(manager, opponentName, teamTalk = null, inGameTactics =
     p.stamina = Math.max(50, p.stamina - rand(8, 15));
   });
 
+  // Si hay fixture de liga activo, avanzar calendario y tabla de posiciones
+  const leagueUpdate = advanceDTLeague(manager, {
+    opponentName,
+    myGoals,
+    oppGoals,
+    result
+  });
+
+  // Posibles ofertas espontáneas si el DT está teniendo una racha brutal
+  if (manager.seasonStats.matches >= 5 && (manager.seasonStats.wins / manager.seasonStats.matches) >= 0.75) {
+    if (!manager.jobOffers || manager.jobOffers.length === 0) {
+      manager.jobOffers = generateManagerOffers(manager);
+    }
+  }
+
   // Generar preguntas para la rueda de prensa post-partido del DT
   const pressConference = generatePressConference(manager, opponentName, result, myGoals, oppGoals);
 
@@ -551,11 +582,336 @@ function simulateDTMatch(manager, opponentName, teamTalk = null, inGameTactics =
     oppGoals,
     myClub: manager.club,
     opponentName,
+    classicData,
     events,
     pressConference,
+    leagueUpdate,
     boardConfidence: manager.boardConfidence,
     fanConfidence: manager.fanConfidence,
     recentForm: manager.recentForm
+  };
+}
+
+/**
+ * Ordena la tabla de posiciones del modo DT
+ */
+function dtTableSorted(table) {
+  if (!table) return [];
+  const list = Array.isArray(table) ? table : Object.values(table);
+  return list.slice().sort((a, b) => {
+    if ((b.pts || 0) !== (a.pts || 0)) return (b.pts || 0) - (a.pts || 0);
+    const dgA = (a.gf || 0) - (a.gc || 0);
+    const dgB = (b.gf || 0) - (b.gc || 0);
+    if (dgB !== dgA) return dgB - dgA;
+    return (b.gf || 0) - (a.gf || 0);
+  });
+}
+
+/**
+ * Garantiza un fixture completo y rotatorio sin rivales repetidos en Modo DT
+ */
+function ensureDTFixture(manager) {
+  const allClubsInLeague = getAllClubs().filter(c => c.leagueKey === manager.leagueKey);
+  const opponents = allClubsInLeague.filter(c => c.name !== manager.club);
+
+  // Inicializar tabla si no existe
+  if (!manager.table || !Array.isArray(manager.table) || manager.table.length === 0) {
+    const clubsForTable = allClubsInLeague.length >= 4 ? allClubsInLeague : [findClub(manager.club) || { name: manager.club }, ...opponents];
+    manager.table = clubsForTable.map(c => ({
+      club: c.name,
+      pj: 0,
+      g: 0,
+      e: 0,
+      p: 0,
+      gf: 0,
+      gc: 0,
+      dg: 0,
+      pts: 0
+    }));
+  }
+
+  // Generar fixture ordenado (ida y vuelta o ida completa) si no está inicializado
+  if (!manager.fixture || !Array.isArray(manager.fixture) || manager.fixture.length === 0 || manager.matchdayIndex >= manager.fixture.length) {
+    if (opponents.length === 0) {
+      // Fallback
+      manager.fixture = ['Rival de Liga 1', 'Rival de Liga 2', 'Rival de Liga 3', 'Rival de Liga 4'];
+    } else {
+      // Mezclar rivales para que cada temporada tenga un calendario fresco
+      const shuffled = [...opponents].sort(() => Math.random() - 0.5);
+      // Ida y vuelta si la liga tiene menos de 10 equipos, o ida si tiene muchos
+      const rounds = shuffled.length <= 8 ? [...shuffled, ...[...opponents].sort(() => Math.random() - 0.5)] : shuffled;
+      manager.fixture = rounds.map(c => c.name);
+    }
+    manager.matchdayIndex = 0;
+    manager.matchdayTotal = manager.fixture.length;
+  }
+
+  const nextOpponent = manager.fixture[manager.matchdayIndex] || (opponents[0] ? opponents[0].name : 'Rival de Liga');
+  return nextOpponent;
+}
+
+/**
+ * Avanza la jornada de liga en el Modo DT y simula el resto de los partidos
+ */
+function advanceDTLeague(manager, matchResult) {
+  ensureDTFixture(manager);
+
+  // 1. Actualizar el partido del DT y de su rival en la tabla
+  let myRow = manager.table.find(t => t.club === manager.club);
+  if (!myRow) {
+    myRow = { club: manager.club, pj: 0, g: 0, e: 0, p: 0, gf: 0, gc: 0, dg: 0, pts: 0 };
+    manager.table.push(myRow);
+  }
+
+  let oppRow = manager.table.find(t => t.club === matchResult.opponentName);
+  if (!oppRow) {
+    oppRow = { club: matchResult.opponentName, pj: 0, g: 0, e: 0, p: 0, gf: 0, gc: 0, dg: 0, pts: 0 };
+    manager.table.push(oppRow);
+  }
+
+  myRow.pj++;
+  myRow.gf += matchResult.myGoals;
+  myRow.gc += matchResult.oppGoals;
+  myRow.dg = myRow.gf - myRow.gc;
+
+  oppRow.pj++;
+  oppRow.gf += matchResult.oppGoals;
+  oppRow.gc += matchResult.myGoals;
+  oppRow.dg = oppRow.gf - oppRow.gc;
+
+  if (matchResult.result === 'V') {
+    myRow.g++;
+    myRow.pts += 3;
+    oppRow.p++;
+  } else if (matchResult.result === 'E') {
+    myRow.e++;
+    myRow.pts += 1;
+    oppRow.e++;
+    oppRow.pts += 1;
+  } else {
+    myRow.p++;
+    oppRow.g++;
+    oppRow.pts += 3;
+  }
+
+  // 2. Simular los demás partidos de la fecha en la liga entre clubes AI
+  const otherClubs = manager.table.filter(t => t.club !== manager.club && t.club !== matchResult.opponentName);
+  for (let i = 0; i < otherClubs.length - 1; i += 2) {
+    const c1 = otherClubs[i];
+    const c2 = otherClubs[i + 1];
+    if (!c1 || !c2) continue;
+
+    const g1 = rand(0, 3);
+    const g2 = rand(0, 3);
+    c1.pj++;
+    c1.gf += g1;
+    c1.gc += g2;
+    c1.dg = c1.gf - c1.gc;
+
+    c2.pj++;
+    c2.gf += g2;
+    c2.gc += g1;
+    c2.dg = c2.gf - c2.gc;
+
+    if (g1 > g2) {
+      c1.g++;
+      c1.pts += 3;
+      c2.p++;
+    } else if (g1 < g2) {
+      c2.g++;
+      c2.pts += 3;
+      c1.p++;
+    } else {
+      c1.e++;
+      c1.pts += 1;
+      c2.e++;
+      c2.pts += 1;
+    }
+  }
+
+  // 3. Ordenar tabla de posiciones
+  manager.table = dtTableSorted(manager.table);
+  const currentPos = manager.table.findIndex(t => t.club === manager.club) + 1;
+
+  // 4. Avanzar fecha
+  manager.matchdayIndex++;
+  let seasonEnded = false;
+  let seasonTrophy = null;
+
+  if (manager.matchdayIndex >= manager.fixture.length) {
+    seasonEnded = true;
+    if (currentPos === 1) {
+      seasonTrophy = `🏆 Campeón ${manager.leagueName} (Temporada ${manager.season})`;
+      if (!manager.records.trophies) manager.records.trophies = [];
+      manager.records.trophies.push(seasonTrophy);
+      manager.reputation = Math.min(99, manager.reputation + 5);
+      manager.boardConfidence = Math.min(100, manager.boardConfidence + 15);
+      manager.budget += rand(10000000, 25000000);
+    }
+
+    // Generar atractivas ofertas de clubes para el DT
+    manager.jobOffers = generateManagerOffers(manager);
+
+    // Preparar siguiente temporada
+    manager.season++;
+    manager.seasonStats = {
+      matches: 0,
+      wins: 0,
+      draws: 0,
+      losses: 0,
+      points: 0,
+      goalsFor: 0,
+      goalsAgainst: 0
+    };
+    manager.fixture = [];
+    manager.table = [];
+    manager.matchdayIndex = 0;
+  }
+
+  return {
+    matchdayIndex: manager.matchdayIndex,
+    matchdayTotal: manager.matchdayTotal,
+    position: currentPos,
+    totalClubs: manager.table.length,
+    seasonEnded,
+    seasonTrophy,
+    offersCount: (manager.jobOffers || []).length
+  };
+}
+
+/**
+ * Genera ofertas de trabajo de otros clubes que quieren fichar al DT
+ */
+function generateManagerOffers(manager) {
+  const allClubs = getAllClubs().filter(c => c.name !== manager.club);
+  const rep = manager.reputation || 50;
+  const trophiesCount = (manager.records.trophies || []).length;
+
+  let candidates = [];
+
+  if (rep >= 80 || trophiesCount >= 2) {
+    // Ofertas de gigantes mundiales y continentales
+    candidates = allClubs.filter(c => (c.media || 65) >= 76);
+  } else if (rep >= 65) {
+    // Clubes de primera división y proyectos ambiciosos
+    candidates = allClubs.filter(c => (c.media || 65) >= 70 && (c.media || 65) <= 80);
+  } else {
+    // Clubes de nivel similar o buscando cambio de rumbo
+    candidates = allClubs.filter(c => (c.media || 65) >= 60 && (c.media || 65) <= 73);
+  }
+
+  if (candidates.length < 3) {
+    candidates = allClubs;
+  }
+
+  // Barajar y tomar 3-5 ofertas distintas
+  const picked = [...candidates].sort(() => Math.random() - 0.5).slice(0, Math.min(5, candidates.length));
+
+  return picked.map(club => {
+    const league = getLeague(club.leagueKey) || { name: 'Liga', country: 'CHILE' };
+    const baseBudget = Math.round(Math.pow((club.media || 65) / 10, 3) * 750000 + rand(3000000, 15000000));
+    
+    let expectation = 'Pelear en la mitad superior de la tabla';
+    if ((club.media || 65) >= 80) expectation = 'Ganar la Liga y competir por la Copa Internacional';
+    else if ((club.media || 65) >= 73) expectation = 'Clasificar a torneos continentales y llegar a semifinales';
+    else expectation = 'Consolidar un proyecto táctico ganador y evitar el descenso';
+
+    const pitchOptions = [
+      `La junta directiva de **${club.name}** admira tu estilo táctico (${manager.tacticStyle || 'ofensivo'}) y te ofrece el mando total del primer equipo.`,
+      `El presidente de **${club.name}** busca un técnico con liderazgo para iniciar una nueva era ganadora.`,
+      `**${club.name}** te presenta un proyecto ambicioso con respaldo financiero para fichar a tus refuerzos predilectos.`
+    ];
+
+    return {
+      club: club.name,
+      clubMedia: club.media || 70,
+      leagueKey: club.leagueKey,
+      leagueName: league.name,
+      country: league.country,
+      budget: baseBudget,
+      wageBudget: Math.round(baseBudget * 0.35),
+      expectation,
+      pitch: pick(pitchOptions)
+    };
+  });
+}
+
+/**
+ * Acepta una oferta de contrato y transfiere al DT a su nuevo club
+ */
+function acceptManagerJobOffer(manager, targetClubName) {
+  const targetOffer = (manager.jobOffers || []).find(o => o.club.toLowerCase() === targetClubName.toLowerCase());
+  const newClub = findClub(targetClubName);
+
+  if (!newClub && !targetOffer) {
+    return { ok: false, message: `No se encontró el club "${targetClubName}".` };
+  }
+
+  const clubName = newClub ? newClub.name : targetOffer.club;
+  const clubMedia = newClub ? (newClub.media || 70) : targetOffer.clubMedia;
+  const leagueKey = newClub ? newClub.leagueKey : targetOffer.leagueKey;
+  const league = getLeague(leagueKey) || { name: 'Liga', country: 'CHILE' };
+
+  // Guardar historial del club anterior
+  if (!manager.careerHistory) manager.careerHistory = [];
+  manager.careerHistory.push({
+    club: manager.club,
+    league: manager.leagueName,
+    seasons: manager.season,
+    matches: manager.records.matches,
+    wins: manager.records.wins,
+    trophies: [...(manager.records.trophies || [])]
+  });
+
+  // Transferir al nuevo club
+  manager.club = clubName;
+  manager.clubMedia = clubMedia;
+  manager.leagueKey = leagueKey;
+  manager.leagueName = league.name;
+  manager.country = league.country;
+
+  // Generar nuevo plantel del club
+  manager.squad = generateClubSquad(newClub || { name: clubName, media: clubMedia, leagueKey });
+  
+  // Seleccionar titulares y banca
+  const sorted = [...manager.squad].sort((a, b) => b.overall - a.overall);
+  const gk = sorted.find(p => p.position === 'POR') || sorted[0];
+  const defs = sorted.filter(p => p.position === 'DEF').slice(0, 4);
+  const mids = sorted.filter(p => p.position === 'MED').slice(0, 3);
+  const fws = sorted.filter(p => p.position === 'DEL').slice(0, 3);
+  const starting = [gk, ...defs, ...mids, ...fws].filter(Boolean).map(p => p.id);
+  const bench = manager.squad.filter(p => !starting.includes(p.id)).map(p => p.id);
+
+  manager.startingXI = starting;
+  manager.bench = bench;
+  manager.captainId = starting[0] || manager.squad[0].id;
+  manager.penaltyTakerId = (fws[0] || starting[0] || manager.squad[0]).id;
+  manager.freeKickTakerId = (mids[0] || starting[0] || manager.squad[0]).id;
+
+  // Nuevo presupuesto
+  manager.budget = targetOffer ? targetOffer.budget : Math.round(Math.pow((clubMedia || 65) / 10, 3) * 750000 + 5000000);
+  manager.wageBudget = Math.round(manager.budget * 0.35);
+
+  // Restablecer confianza y calendario para la nueva temporada
+  manager.boardConfidence = 85;
+  manager.fanConfidence = 80;
+  manager.reputation = Math.min(99, manager.reputation + 2);
+  manager.recentForm = [];
+  manager.fixture = [];
+  manager.table = [];
+  manager.matchdayIndex = 0;
+  manager.jobOffers = [];
+
+  // Crear fixture para el nuevo club
+  ensureDTFixture(manager);
+
+  return {
+    ok: true,
+    club: manager.club,
+    league: manager.leagueName,
+    country: manager.country,
+    budget: manager.budget,
+    squadCount: manager.squad.length
   };
 }
 
@@ -636,5 +992,11 @@ module.exports = {
   generateClubSquad,
   calculateTeamChemistryAndRating,
   simulateDTMatch,
-  generatePressConference
+  generatePressConference,
+  ensureDTFixture,
+  advanceDTLeague,
+  dtTableSorted,
+  generateManagerOffers,
+  acceptManagerJobOffer
 };
+
