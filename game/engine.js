@@ -889,6 +889,27 @@ function maybeNationalTournament(userId, player, leadingDesc) {
 
 /** Cierra la temporada: progresión, premios y mercado de pases */
 function finishSeasonFlow(userId, player, leadingDesc) {
+  // Evaluación de objetivos de temporada y posición en liga antes de limpiar tabla
+  const currentTable = standingsSorted(player.table || {});
+  const posIndex = currentTable.findIndex(t => t.club === player.club);
+  const position = posIndex >= 0 ? posIndex + 1 : 1;
+
+  if (player.currentObjective) {
+    const isCompleted = checkSeasonObjective(player, player.currentObjective, currentTable, position);
+    if (isCompleted) {
+      const bonusPay = Math.round((player.salary || 50000) * 0.2);
+      player.bank = (player.bank || 0) + bonusPay;
+      player.morale = Math.min(100, (player.morale || 75) + 8);
+      const rewardMsg = typeof player.currentObjective.rewardText === 'function'
+        ? player.currentObjective.rewardText(player)
+        : (player.currentObjective.rewardText || '¡Objetivo de la directiva cumplido con éxito!');
+      leadingDesc += `\n\n🎯 **Objetivo de la Directiva CUMPLIDO:** ${rewardMsg} (+💰 $${bonusPay.toLocaleString('en-US')} bonus)`;
+    } else {
+      player.morale = Math.max(10, (player.morale || 75) - 4);
+      leadingDesc += `\n\n⚠️ **Objetivo de la Directiva NO alcanzado:** La dirigencia esperaba mayor protagonismo.`;
+    }
+  }
+
   const { development, awards } = finishSeason(player);
 
   const growthText = development.growth >= 0
@@ -909,28 +930,12 @@ function finishSeasonFlow(userId, player, leadingDesc) {
       `\n\n💰 Salario anual cobrado: **${(player.salary || 50000).toLocaleString('en-US')}** · Saldo en cuenta: **${(player.bank || 0).toLocaleString('en-US')}**`
     );
 
-  // Evaluación de objetivos de temporada
-  if (player.currentObjective) {
-    const table = standingsSorted(player.table || []);
-    const posIndex = table.findIndex(t => t.club === player.club);
-    const position = posIndex + 1;
-    const isCompleted = checkSeasonObjective(player, player.currentObjective, table, position);
-    if (isCompleted) {
-      const bonusPay = Math.round((player.salary || 50000) * 0.2);
-      player.bank = (player.bank || 0) + bonusPay;
-      player.morale = Math.min(100, (player.morale || 75) + 8);
-      leadingDesc += `\n\n🎯 **Objetivo de la Directiva CUMPLIDO:** ${player.currentObjective.rewardText(player)} (+💰 $${bonusPay.toLocaleString('en-US')} bonus)`;
-    } else {
-      player.morale = Math.max(10, (player.morale || 75) - 4);
-      leadingDesc += `\n\n⚠️ **Objetivo de la Directiva NO alcanzado:** La dirigencia esperaba mayor protagonismo.`;
-    }
-  }
-
   // Generar nuevo objetivo para la siguiente temporada
   const currentLeague = getLeague(player.leagueKey);
   if (currentLeague) {
     player.currentObjective = generateSeasonObjective(player, currentLeague);
   }
+
 
   // Retiro a los 42 años o voluntario
   if (player.retired || player.age >= 42) {
@@ -1632,10 +1637,6 @@ function simulateEntireSeason(userId) {
     }
 
     while (player.nationalCup && player.nationalCup.phase !== 'eliminado' && player.nationalCup.phase !== 'campeon') {
-      if (player.nationalCup.phase === 'final') {
-        return promptForFinal(userId, player, player.nationalCup);
-      }
-
       const opp = nextOpponent(player.nationalCup);
       if (!opp) break;
       const res = simulateMatch(player, club, opp, 'equilibrado', {});
@@ -1651,10 +1652,6 @@ function simulateEntireSeason(userId) {
         break;
       } else if (out.status === 'eliminado') {
         break;
-      }
-
-      if (player.nationalCup.phase === 'final') {
-        return promptForFinal(userId, player, player.nationalCup);
       }
     }
 
@@ -1677,10 +1674,6 @@ function simulateEntireSeason(userId) {
     }
 
     while (player.cup && player.cup.phase !== 'eliminado' && player.cup.phase !== 'campeon') {
-      if (player.cup.phase === 'final') {
-        return promptForFinal(userId, player, player.cup);
-      }
-
       const opp = nextOpponent(player.cup);
       if (!opp) break;
       const res = simulateMatch(player, club, opp, 'equilibrado', {});
@@ -1696,10 +1689,6 @@ function simulateEntireSeason(userId) {
         break;
       } else if (out.status === 'eliminado') {
         break;
-      }
-
-      if (player.cup.phase === 'final') {
-        return promptForFinal(userId, player, player.cup);
       }
     }
 
@@ -1726,10 +1715,6 @@ function simulateEntireSeason(userId) {
     if (player.stage === 'mundial' && player.worldCup) {
       const nationObj = findNation(player.nationality) || { media: 75 };
       while (player.worldCup && player.worldCup.phase !== 'eliminado' && player.worldCup.phase !== 'campeon') {
-        if (player.worldCup.phase === 'final') {
-          return promptForFinal(userId, player, player.worldCup);
-        }
-
         const opp = nextOpponent(player.worldCup);
         if (!opp) break;
         const res = simulateMatch(player, { name: player.worldCup.myTeam, media: nationObj.media, tier: 5 }, opp, 'equilibrado', {});
@@ -1746,19 +1731,11 @@ function simulateEntireSeason(userId) {
         } else if (out.status === 'eliminado') {
           break;
         }
-
-        if (player.worldCup.phase === 'final') {
-          return promptForFinal(userId, player, player.worldCup);
-        }
       }
       player.worldCup = null;
     } else if (player.stage === 'copa_seleccion' && player.continentalNationalCup) {
       const nationObj = findNation(player.nationality) || { media: 75 };
       while (player.continentalNationalCup && player.continentalNationalCup.phase !== 'eliminado' && player.continentalNationalCup.phase !== 'campeon') {
-        if (player.continentalNationalCup.phase === 'final') {
-          return promptForFinal(userId, player, player.continentalNationalCup);
-        }
-
         const opp = nextOpponent(player.continentalNationalCup);
         if (!opp) break;
         const res = simulateMatch(player, { name: player.continentalNationalCup.myTeam, media: nationObj.media, tier: 5 }, opp, 'equilibrado', {});
@@ -1775,10 +1752,6 @@ function simulateEntireSeason(userId) {
         } else if (out.status === 'eliminado') {
           break;
         }
-
-        if (player.continentalNationalCup.phase === 'final') {
-          return promptForFinal(userId, player, player.continentalNationalCup);
-        }
       }
       player.continentalNationalCup = null;
     }
@@ -1786,17 +1759,19 @@ function simulateEntireSeason(userId) {
 
   // 5. Cierre de Temporada
   const sStats = { ...player.seasonStats };
-  const { development, awards } = finishSeason(player);
-  storage.setPlayer(userId, player);
-
-  const newTrophies = player.career.trophies.slice(initialTrophiesCount);
-  const avgRating = sStats.apps > 0 ? (sStats.avgRatingSum / sStats.apps).toFixed(2) : '—';
-  const table = standingsSorted(player.table);
+  const table = standingsSorted(player.table || {});
   const posIndex = table.findIndex(t => t.club === player.club);
   const posicion = posIndex >= 0 ? posIndex + 1 : 1;
   const totalClubs = table.length || 16;
   const leagueName = league ? league.name : 'Liga';
   const countryFlag = flagFor(league ? league.country : '');
+
+  const { development, awards } = finishSeason(player);
+  storage.setPlayer(userId, player);
+
+  const newTrophies = player.career.trophies.slice(initialTrophiesCount);
+  const avgRating = sStats.apps > 0 ? (sStats.avgRatingSum / sStats.apps).toFixed(2) : '—';
+
 
   const seasonSummaryEmbed = new EmbedBuilder()
     .setColor(0x2ecc71)
