@@ -339,16 +339,116 @@ function poolFor(position, isFinal = false) {
   return ['mano_a_mano', 'penal', 'tiro_libre', 'gambeta_desequilibrante', 'bombazo_larga_distancia', 'cabezazo', 'doble_gambeta', 'rabona_chilena'];
 }
 
+function getTacticalClue(type, winningIndex, options) {
+  const cluesByType = {
+    atajar_penal: [
+      '🔍 **Lectura del arquero:** El pateador abre el pie derecho y mira fijamente tu palo izquierdo.',
+      '🔍 **Lectura del arquero:** El pateador viene embalado recto a la pelota con intención de fusilar al centro.',
+      '🔍 **Lectura del arquero:** El pateador gira el cuerpo y perfila el remate cruzado hacia tu palo derecho.'
+    ],
+    atajada_mano_a_mano: [
+      '🔍 **Lectura defensiva:** El atacante viene con poco ángulo y busca definir al bulto; el achique en cruz tapa todo.',
+      '🔍 **Lectura defensiva:** El delantero intenta una vaselina rápida; si te quedas bien parado abajo no tiene espacio.',
+      '🔍 **Lectura defensiva:** El rival adelanta demasiado la pelota en el último control; salir al piso es corte limpio asegurado.'
+    ],
+    volada_angulo: [
+      '🔍 **Lectura de vuelo:** El tiro lleva rosca abierta buscando el ángulo superior izquierdo a contramano.',
+      '🔍 **Lectura de vuelo:** Un misil potentísimo al centro-alto que exige estirada firme a dos manos.',
+      '🔍 **Lectura de vuelo:** Balón venenoso que baja rápido al rincón derecho; una manotazo a la punta de los dedos la manda al córner.'
+    ],
+    descolgar_centro: [
+      '🔍 **Lectura del área:** Hay demasiada congestión en el área chica; la mejor decisión es salir con los puños y despejar lejos.',
+      '🔍 **Lectura del área:** El centro viene alto y flotado; saltar en el punto penal te permite atenazarla arriba con autoridad.',
+      '🔍 **Lectura del área:** Los atacantes buscan el anticipo rápido al primer palo; quedarte bien afirmado bajo los tres palos te da reflejo.'
+    ],
+    achique_urgencia: [
+      '🔍 **Lectura de líbero:** El pelotazo pica alto fuera del área; anticipar de cabeza te permite despejar sin cometer falta.',
+      '🔍 **Lectura de líbero:** El atacante corre al límite del fuera de juego; barrer con los pies directo a la pelota lo neutraliza.',
+      '🔍 **Lectura de líbero:** Tu central viene cerrando la marca; esperar en la medialuna perfilado te da control total.'
+    ],
+    final_atajada_consagracion: [
+      '🔍 **Lectura de final:** El remate sale rasante y esquinado a quemarropa; estirar la pierna con reflejo puro salva el gol.',
+      '🔍 **Lectura de final:** Un chanfle perfecto buscando la escuadra; exige la volada agónica de tu vida al ángulo.',
+      '🔍 **Lectura de final:** Disparo potente directo al pecho; poner el cuerpo firme y embolsar asegura la copa.'
+    ],
+    penal: [
+      '🔍 **Lectura del penal:** El arquero se balancea hacia su derecha regalando el palo izquierdo.',
+      '🔍 **Lectura del penal:** El arquero empieza a volar antes de tiempo hacia una punta; patear fuerte al medio es gol cantado.',
+      '🔍 **Lectura del penal:** El arquero hace pasos cortos hacia su izquierda dejando el rincón derecho totalmente descubierto.'
+    ],
+    mano_a_mano: [
+      '🔍 **Lectura ofensiva:** El arquero rival achica apurado y deja abierto el palo lejano para colocarla suave.',
+      '🔍 **Lectura ofensiva:** El arquero se arrojó al suelo antes de tiempo; picarla por arriba con clase entra limpia.',
+      '🔍 **Lectura ofensiva:** El arquero sale lanzado en velocidad; con un enganche corto te lo sacas de encima con el arco libre.'
+    ],
+    tiro_libre: [
+      '🔍 **Lectura de pelota parada:** La barrera está mal parada y deja el ángulo superior izquierdo sin cobertura.',
+      '🔍 **Lectura de pelota parada:** La barrera es de baja estatura; un bombazo seco por arriba se clava en la red.',
+      '🔍 **Lectura de pelota parada:** La barrera rival salta en bloque desesperada; un tiro rasante por abajo entra directo.'
+    ],
+    bombazo_larga_distancia: [
+      '🔍 **Lectura de media distancia:** El arquero está adelantado dos metros; un misil teledirigido a la escuadra es inalcanzable.',
+      '🔍 **Lectura de media distancia:** Los centrales tapan la visión del arquero; pegarle con comba de tres dedos lo deja inmóvil.',
+      '🔍 **Lectura de media distancia:** La cancha está mojada y rápida; un remate rasante con sobrepique se le escurre de las manos.'
+    ],
+    gambeta_desequilibrante: [
+      '🔍 **Lectura de regate:** El defensor viene corriendo con el cuerpo inclinado hacia atrás; una bicicleta veloz lo desborda.',
+      '🔍 **Lectura de regate:** El zaguero te encierra sobre la banda; un enganche seco hacia tu pierna hábil te abre todo el arco.',
+      '🔍 **Lectura de regate:** El central abre excesivamente las piernas para bloquearte; el caño de fantasía pasa perfecto.'
+    ],
+    pase_filtrado_magico: [
+      '🔍 **Lectura de visión:** La última línea defensiva está cerrada en bloque; un pase pinchado por arriba cae justo a espaldas.',
+      '🔍 **Lectura de visión:** Hay un hueco milimétrico entre el central y el lateral; un pase de tres dedos al ras del piso deja a tu delantero solo.',
+      '🔍 **Lectura de visión:** Dos rivales te presionan de frente; un taconazo sorpresa de espaldas descoloca a toda la defensa.'
+    ],
+    centro_area: [
+      '🔍 **Lectura táctica:** Tu delantero centro ataca el primer palo con ventaja; un pase entre líneas es medio gol.',
+      '🔍 **Lectura táctica:** La zaga rival retrocede desordenada; un centro rasante al corazón del área encuentra la llegada de frente.',
+      '🔍 **Lectura táctica:** El lateral rival cerró hacia el centro; el cambio de frente al extremo que llega solo por el otro lado es letal.'
+    ],
+    cabezazo: [
+      '🔍 **Lectura de córner:** El arquero duda en salir y el primer palo queda desguarnecido para el anticipo de cabeza.',
+      '🔍 **Lectura de córner:** El centro viene llovido al punto penal; si te elevas entre los centrales impones tu físico.',
+      '🔍 **Lectura de córner:** Toda la marca fue al primer palo; entrar por detrás al segundo palo te deja cabecear en soledad.'
+    ],
+    corte_defensivo_extremo: [
+      '🔍 **Lectura defensiva:** El delantero arma el remate a un metro; barrerte al piso con el empeine bloquea la trayectoria.',
+      '🔍 **Lectura defensiva:** El atacante fusila con potencia; interponer el cuerpo como muro desvía el balón.',
+      '🔍 **Lectura defensiva:** La pelota ya superó a tu arquero; un despeje acrobático sobre la raya evita el gol en la foto.'
+    ],
+    final_gol_historico: [
+      '🔍 **Lectura de gloria:** La pelota cae picando a la altura perfecta; una volea furiosa de primera revienta la red.',
+      '🔍 **Lectura de gloria:** El arquero rival cubre el primer palo; colocarla con sutileza al rincón más lejano entra suave.',
+      '🔍 **Lectura de gloria:** El zaguero se tira desesperado; un amague en seco te deja el arco libre para entrar con pelota y todo.'
+    ],
+    final_tiro_libre_epico: [
+      '🔍 **Lectura de campeonato:** La barrera está muy pegada; acariciarla con rosca justa por arriba entra limpia al ángulo.',
+      '🔍 **Lectura de campeonato:** El arquero se confió en su barrera; un fierrazo violento a su propio palo lo sorprende por completo.',
+      '🔍 **Lectura de campeonato:** En el último segundo todos los defensores saltan; un tiro rasante por abajo sella el título.'
+    ]
+  };
+
+  const pool = cluesByType[type];
+  if (pool && pool[winningIndex]) return pool[winningIndex];
+
+  const targetOpt = options[winningIndex] || options[0];
+  return `🔍 **Lectura táctica:** La zaga rival deja un espacio claro: la mejor opción es **${targetOpt.label}**.`;
+}
+
 /**
- * Crea un minijuego pendiente.
+ * Crea un minijuego pendiente con pistas tácticas inteligentes.
  */
 function createMinigame(player, context) {
   const isFinal = context.isFinal || false;
   const type = pick(poolFor(player.position, isFinal));
   const def = MINIGAMES[type];
+  const winningIndex = rand(0, def.options.length - 1);
+  const tacticalClue = getTacticalClue(type, winningIndex, def.options);
+
   return {
     type,
-    winningIndex: rand(0, def.options.length - 1),
+    winningIndex,
+    tacticalClue,
     minute: isFinal ? rand(88, 94) : rand(25, 89),
     club: context.club,
     opponent: context.opponent,
