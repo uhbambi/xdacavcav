@@ -22,7 +22,11 @@ const { isClassicMatch, getClassicData } = require('../utils/classics.js');
 const { generateSeasonObjective, checkSeasonObjective } = require('../utils/seasonObjectives.js');
 const { initializeBallonDOrVote, registerVote, closeBallonDOrVote, applyBallonDOrRewards } = require('../utils/ballonDor.js');
 const { checkRetirementAge, setupRetirementCeremony, applyRetirementCeremonyBonuses, generateRetirementEmbed } = require('../utils/retirement.js');
-const { newManager, transitionPlayerToManager, simulateDTMatch, calculateTeamChemistryAndRating, generatePressConference } = require('../utils/manager.js');
+const {
+  newManager, transitionPlayerToManager, simulateDTMatch, calculateTeamChemistryAndRating,
+  generatePressConference, ensureDTFixture, advanceDTLeague, dtTableSorted,
+  generateManagerOffers, acceptManagerJobOffer, getManagerRetirementVerdict, retireManager, simulateEntireDTSeason
+} = require('../utils/manager.js');
 
 function flagFor(country) {
   return FLAGS[country] || '';
@@ -49,6 +53,30 @@ function continueRow(userId) {
     new ButtonBuilder().setCustomId(`tabla:${userId}`).setLabel('📊 Tabla').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(`perfil:${userId}`).setLabel('🪪 Perfil').setStyle(ButtonStyle.Secondary)
   );
+}
+
+function dtContinueRow(userId, manager) {
+  const isSeasonEnded = manager && manager.matchdayIndex >= (manager.matchdayTotal || 16);
+  const row = new ActionRowBuilder();
+  
+  if (!isSeasonEnded) {
+    row.addComponents(
+      new ButtonBuilder().setCustomId(`dt_sim:${userId}`).setLabel('▶️ Siguiente partido').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`dt_fastseason:${userId}`).setLabel('⏩ Simular Temporada').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`dt_tabla:${userId}`).setLabel('📊 Tabla').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`dt_panel:${userId}`).setLabel('👔 Panel DT').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`dt_ofertas:${userId}`).setLabel('💼 Ofertas').setStyle(ButtonStyle.Secondary)
+    );
+  } else {
+    row.addComponents(
+      new ButtonBuilder().setCustomId(`dt_sim:${userId}`).setLabel('▶️ Próxima Temporada').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`dt_ofertas:${userId}`).setLabel('💼 Ver Ofertas').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`dt_tabla:${userId}`).setLabel('📊 Tabla Final').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`dt_panel:${userId}`).setLabel('👔 Panel DT').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`dt_retirar:${userId}`).setLabel('🏅 Retirarse').setStyle(ButtonStyle.Danger)
+    );
+  }
+  return row;
 }
 
 function tacticRow(userId) {
@@ -270,9 +298,19 @@ function applyMatchToPlayer(player, result, { national = false } = {}) {
 /** Punto de entrada de cada paso de la carrera */
 function simulateStep(userId) {
   const player = storage.getPlayer(userId);
-  if (!player) return noPlayer();
+  if (!player) {
+    const manager = storage.getManager(userId);
+    if (manager && !manager.retired) {
+      return dtSimulateStep(userId);
+    }
+    return noPlayer();
+  }
   if (player.retired) {
-    return { ok: false, ephemeral: true, content: 'Este jugador ya está retirado. Usa `/crear-jugador` para empezar una carrera nueva.' };
+    const manager = storage.getManager(userId);
+    if (manager && !manager.retired) {
+      return dtSimulateStep(userId);
+    }
+    return { ok: false, ephemeral: true, content: 'Este jugador ya está retirado. Usa `/crear-jugador` para empezar una carrera nueva o `/dt crear` para ser DT.' };
   }
 
   // Cosas pendientes primero
@@ -1543,8 +1581,18 @@ function promptForFinal(userId, player, tournament) {
 
 function simulateEntireSeason(userId) {
   const player = storage.getPlayer(userId);
-  if (!player) return noPlayer();
+  if (!player) {
+    const manager = storage.getManager(userId);
+    if (manager && !manager.retired) {
+      return dtSimulateEntireSeason(userId);
+    }
+    return noPlayer();
+  }
   if (player.retired) {
+    const manager = storage.getManager(userId);
+    if (manager && !manager.retired) {
+      return dtSimulateEntireSeason(userId);
+    }
     return { ok: false, ephemeral: true, content: 'Este jugador ya se ha retirado. Usa `/crear-jugador` para empezar una nueva carrera.' };
   }
 
@@ -1838,6 +1886,299 @@ function simulateEntireSeason(userId) {
   };
 }
 
+// ─────────────────────────────── MODO DIRECTOR TÉCNICO (DT) ───────────────────────────────
+
+function dtSimulateStep(userId) {
+  const manager = storage.getManager(userId);
+  if (!manager) {
+    return { ok: false, ephemeral: true, content: 'No tienes una carrera activa como Director Técnico. Usa `/dt crear [nombre] [club]` para empezar.' };
+  }
+  if (manager.retired) {
+    return { ok: false, ephemeral: true, content: `Esta carrera de DT con **${manager.name}** ya ha finalizado por retiro. Usa \`/dt crear\` para iniciar una nueva carrera.` };
+  }
+
+  // Si ya terminó la temporada anterior y presiona seguir, avanzar a la siguiente
+  if (manager.matchdayIndex >= (manager.matchdayTotal || 16)) {
+    advanceDTLeague(manager);
+  }
+
+  const opponent = ensureDTFixture(manager);
+  const matchSim = simulateDTMatch(manager, opponent);
+  storage.setManager(userId, manager);
+
+  const classicText = matchSim.classicData && matchSim.classicData.isClassic
+    ? `🔥 **¡CLÁSICO HISTÓRICO: ${matchSim.classicData.name}!**\n*${matchSim.classicData.desc}*\n\n`
+    : '';
+
+  const leagueText = matchSim.leagueUpdate
+    ? `\n\n📍 **Liga:** Fecha ${matchSim.leagueUpdate.matchdayIndex}/${matchSim.leagueUpdate.matchdayTotal} · Posición actual: **#${matchSim.leagueUpdate.position}**`
+    : '';
+
+  const seasonWrap = matchSim.leagueUpdate?.seasonEnded
+    ? `\n\n🏁 **¡FINALIZÓ LA TEMPORADA!** ${matchSim.leagueUpdate.seasonTrophy ? `\n${matchSim.leagueUpdate.seasonTrophy}` : ''}\n💼 Tienes **${matchSim.leagueUpdate.offersCount} nuevas ofertas de clubes**. Usa los botones de abajo para verlas.`
+    : '';
+
+  const embed = new EmbedBuilder()
+    .setColor(matchSim.result === 'V' ? 0x2ecc71 : matchSim.result === 'E' ? 0xf1c40f : 0xe74c3c)
+    .setTitle(`⚽ ${manager.club} ${matchSim.myGoals} - ${matchSim.oppGoals} ${matchSim.opponentName}`)
+    .setDescription(
+      classicText +
+      `Resultado: **${matchSim.result === 'V' ? '¡VICTORIA!' : matchSim.result === 'E' ? 'EMPATE' : 'DERROTA'}**\n\n` +
+      `📋 **Crónica de Jugadas Clave:**\n` +
+      matchSim.events.map(e => `• **${e.minute}'** ${e.title}\n  ${e.desc}`).join('\n\n') +
+      leagueText +
+      seasonWrap +
+      `\n\n📊 **Confianza Directiva:** ${manager.boardConfidence}% | **Hinchada:** ${manager.fanConfidence}%`
+    )
+    .setFooter({ text: 'Toca "Siguiente partido" para continuar el calendario oficial' });
+
+  return {
+    ok: true,
+    ephemeral: false,
+    embeds: [embed],
+    components: [dtContinueRow(userId, manager)]
+  };
+}
+
+function dtSimulateEntireSeason(userId) {
+  const manager = storage.getManager(userId);
+  if (!manager) {
+    return { ok: false, ephemeral: true, content: 'No tienes una carrera activa como Director Técnico. Usa `/dt crear [nombre] [club]` para empezar.' };
+  }
+  if (manager.retired) {
+    return { ok: false, ephemeral: true, content: `Esta carrera de DT con **${manager.name}** ya ha finalizado por retiro.` };
+  }
+
+  // Si ya estaba en final de temporada, avanzamos de temporada primero
+  if (manager.matchdayIndex >= (manager.matchdayTotal || 16)) {
+    advanceDTLeague(manager);
+  }
+
+  const seasonRes = simulateEntireDTSeason(manager);
+  storage.setManager(userId, manager);
+
+  const embed = new EmbedBuilder()
+    .setColor(seasonRes.isChampion ? 0xf1c40f : 0x3498db)
+    .setTitle(`🏆 Resumen de Temporada ${seasonRes.season} · ${manager.club}`)
+    .setDescription(
+      `Has disputado la temporada completa de liga como Director Técnico de **${manager.club}** (${manager.leagueName}).\n\n` +
+      `🏅 **Posición Final:** **#${seasonRes.position}** de ${seasonRes.totalClubs} equipos\n` +
+      (seasonRes.isChampion ? `👑 **¡CAMPEÓN DE LA LIGA!** Se añade un nuevo trofeo a tu palmarés.\n` : '') +
+      `\n📊 **Rendimiento:**\n` +
+      `• Partidos: **${manager.seasonStats.matches}** (V: ${manager.seasonStats.wins} · E: ${manager.seasonStats.draws} · D: ${manager.seasonStats.losses})\n` +
+      `• Puntos: **${manager.seasonStats.points} pts** | DG: **${manager.seasonStats.goalsFor - manager.seasonStats.goalsAgainst}**\n` +
+      `• Confianza Directiva: **${manager.boardConfidence}%** | Hinchada: **${manager.fanConfidence}%**\n` +
+      `• Presupuesto actual: **$${manager.budget.toLocaleString('en-US')}**\n` +
+      `\n💼 **Mercado de Contratos:** Tienes **${(seasonRes.offers || []).length} ofertas** de otros clubes para dirigirlos.`
+    )
+    .setFooter({ text: 'Revisa las ofertas de clubes o continúa con la próxima temporada' });
+
+  return {
+    ok: true,
+    ephemeral: false,
+    embeds: [embed],
+    components: [dtContinueRow(userId, manager)]
+  };
+}
+
+function dtTableView(userId) {
+  const manager = storage.getManager(userId);
+  if (!manager) {
+    return { ok: false, ephemeral: true, content: 'No tienes carrera activa como DT.' };
+  }
+
+  ensureDTFixture(manager);
+  const table = dtTableSorted(manager.table || []);
+
+  const lines = table.map((row, idx) => {
+    const isMyClub = row.club === manager.club;
+    const mark = isMyClub ? '👉 ' : `${idx + 1}. `;
+    const clubName = isMyClub ? `**${row.club}**` : row.club;
+    return `${mark}${clubName.padEnd(20)} | PJ:${row.pj} G:${row.g} E:${row.e} P:${row.p} | DG:${row.dg >= 0 ? '+' : ''}${row.dg} | **${row.pts} pts**`;
+  });
+
+  const embed = new EmbedBuilder()
+    .setColor(0x2980b9)
+    .setTitle(`🏆 Tabla de Posiciones · ${manager.leagueName} (Temporada ${manager.season})`)
+    .setDescription(
+      `Jornada: **${manager.matchdayIndex}/${manager.matchdayTotal || 16}**\n\n` +
+      `\`\`\`text\n${lines.join('\n')}\n\`\`\``
+    );
+
+  return {
+    ok: true,
+    ephemeral: true,
+    embeds: [embed],
+    components: [dtContinueRow(userId, manager)]
+  };
+}
+
+function dtOffersView(userId) {
+  const manager = storage.getManager(userId);
+  if (!manager) {
+    return { ok: false, ephemeral: true, content: 'No tienes carrera activa como DT.' };
+  }
+
+  if (!manager.jobOffers || manager.jobOffers.length === 0) {
+    manager.jobOffers = generateManagerOffers(manager);
+    storage.setManager(userId, manager);
+  }
+
+  const offers = manager.jobOffers;
+  const embed = new EmbedBuilder()
+    .setColor(0xf39c12)
+    .setTitle(`💼 Mercado de Contratos · Ofertas para DT ${manager.name}`)
+    .setDescription(
+      `Tu reputación (**${manager.reputation}/99**) y palmarés llaman la atención en el mercado internacional.\n` +
+      `Club actual: **${manager.club}**\n\n` +
+      offers.map((o, idx) =>
+        `**${idx + 1}. ${o.club}** (${o.country} · ${o.leagueName})\n` +
+        `• Media del Club: ⭐ **${o.clubMedia} OVR**\n` +
+        `• Presupuesto de Fichajes: 💰 **$${o.budget.toLocaleString('en-US')}**\n` +
+        `• Objetivo: *${o.expectation}*\n` +
+        `• *"${o.pitch}"*\n`
+      ).join('\n') +
+      `\n✍️ Presiona uno de los botones abajo para firmar contrato con un club o usa \`/dt aceptar [club]\`.`
+    );
+
+  const offerButtons = offers.slice(0, 4).map((o, i) =>
+    new ButtonBuilder()
+      .setCustomId(`dt_accept:${userId}:${i}`)
+      .setLabel(`Firmar: ${o.club}`.slice(0, 80))
+      .setStyle(ButtonStyle.Primary)
+  );
+
+  const buttonsRow = new ActionRowBuilder().addComponents(offerButtons);
+
+  return {
+    ok: true,
+    ephemeral: false,
+    embeds: [embed],
+    components: [buttonsRow, dtContinueRow(userId, manager)]
+  };
+}
+
+function dtAcceptOfferAction(userId, offerIndexOrName) {
+  const manager = storage.getManager(userId);
+  if (!manager) {
+    return { ok: false, ephemeral: true, content: 'No tienes carrera activa como DT.' };
+  }
+
+  let clubName = offerIndexOrName;
+  if (!isNaN(offerIndexOrName) && manager.jobOffers && manager.jobOffers[parseInt(offerIndexOrName)]) {
+    clubName = manager.jobOffers[parseInt(offerIndexOrName)].club;
+  }
+
+  const result = acceptManagerJobOffer(manager, clubName);
+  if (!result.ok) {
+    return { ok: false, ephemeral: true, content: `❌ ${result.message}` };
+  }
+
+  storage.setManager(userId, manager);
+
+  const embed = new EmbedBuilder()
+    .setColor(0x27ae60)
+    .setTitle(`🤝 ¡CONTRATO FIRMADO! BIENVENIDO A ${result.club.toUpperCase()}`)
+    .setDescription(
+      `**${manager.name}** ha sido presentado oficialmente como el nuevo Director Técnico de **${result.club}** (${result.league}).\n\n` +
+      `💼 **Condiciones del nuevo proyecto:**\n` +
+      `• Presupuesto para fichajes: 💰 **$${result.budget.toLocaleString('en-US')}**\n` +
+      `• Plantel recibido: **${result.squadCount} futbolistas** listos para tu esquema táctico.\n` +
+      `• Nuevo calendario de liga preparado.\n\n` +
+      `¡Éxitos en tu nueva era!`
+    );
+
+  return {
+    ok: true,
+    ephemeral: false,
+    embeds: [embed],
+    components: [dtContinueRow(userId, manager)]
+  };
+}
+
+function dtPanelView(userId) {
+  const manager = storage.getManager(userId);
+  if (!manager) {
+    return { ok: false, ephemeral: true, content: 'No tienes carrera activa como DT.' };
+  }
+
+  const metrics = calculateTeamChemistryAndRating(manager);
+  const xi = manager.startingXI.map(id => manager.squad.find(p => p.id === id)).filter(Boolean);
+  const currentOpp = ensureDTFixture(manager);
+  const table = dtTableSorted(manager.table || []);
+  const pos = table.findIndex(t => t.club === manager.club) + 1;
+
+  const embed = new EmbedBuilder()
+    .setColor(0x34495e)
+    .setTitle(`👔 Despacho de ${manager.name} · ${manager.club}`)
+    .setDescription(
+      `**Liga:** ${manager.leagueName} · **Temporada:** ${manager.season}\n` +
+      `**Posición en Tabla:** ${pos > 0 ? `**#${pos}** (${manager.seasonStats.points} pts)` : 'Por comenzar'}\n` +
+      `**Próximo Rival:** ⚔️ **${currentOpp}** (Fecha ${manager.matchdayIndex + 1}/${manager.matchdayTotal || 16})\n` +
+      `**Presupuesto:** 💰 $${manager.budget.toLocaleString('en-US')} · **Reputación:** ⭐ ${manager.reputation}/99\n\n` +
+      `📈 **Métricas de Equipo:**\n` +
+      `• Media Titular: **${metrics.avgRating}** | Química de Equipo: **${metrics.chemistry}%** 🧪\n` +
+      `• Confianza Directiva: **${manager.boardConfidence}%** | Confianza Hinchada: **${manager.fanConfidence}%**\n` +
+      `• Esquema Táctico: **${manager.formation}** (${manager.tacticStyle})\n` +
+      `• Récord: **${manager.records.wins}V - ${manager.records.draws}E - ${manager.records.losses}D**\n` +
+      (manager.jobOffers && manager.jobOffers.length ? `\n💼 **¡Tienes ${manager.jobOffers.length} ofertas de clubes para ficharte!** Usa el botón "Ofertas" para verlas.` : '') +
+      `\n\n👥 **11 Titular Actual:**\n` +
+      xi.map((p, idx) => `${idx + 1}. **${p.name}** (${p.position} ${p.overall}) — ${p.goals}G / ${p.assists}A`).join('\n')
+    );
+
+  return {
+    ok: true,
+    ephemeral: true,
+    embeds: [embed],
+    components: [dtContinueRow(userId, manager)]
+  };
+}
+
+function dtRetireAction(userId) {
+  const manager = storage.getManager(userId);
+  if (!manager) {
+    return { ok: false, ephemeral: true, content: 'No tienes una carrera activa como Director Técnico.' };
+  }
+  if (manager.retired) {
+    return { ok: false, ephemeral: true, content: 'Este Director Técnico ya está retirado.' };
+  }
+
+  const verdict = retireManager(manager);
+  storage.setManager(userId, manager);
+
+  const embed = new EmbedBuilder()
+    .setColor(0xf1c40f)
+    .setTitle(`🏅 RETIRO OFICIAL DEL DIRECTOR TÉCNICO · ${manager.name}`)
+    .setDescription(
+      `Después de dirigir **${verdict.matches} partidos oficiales**, ${manager.name} anuncia su retiro definitivo de los banquillos.\n\n` +
+      `👑 **Rango Histórico de DT:** ${verdict.emoji} **${verdict.titulo}** (Nivel ${verdict.tier})\n` +
+      `Puntaje de Legado Técnico: **${verdict.score} pts**`
+    )
+    .addFields(
+      { name: 'Partidos Dirigidos', value: `${verdict.matches}`, inline: true },
+      { name: 'Efectividad', value: `${verdict.winRate}% de victorias`, inline: true },
+      { name: 'Récord Histórico', value: `${verdict.wins}V - ${verdict.draws}E - ${verdict.losses}D`, inline: true },
+      { name: 'Títulos Conseguidos', value: `${verdict.trophiesCount}`, inline: true },
+      { name: 'Reputación Final', value: `⭐ ${verdict.reputation}/99`, inline: true },
+      { name: 'Clubes Dirigidos', value: verdict.clubsManaged.join(', ') || manager.club, inline: true }
+    )
+    .setFooter({ text: 'Tu carrera de DT ha concluido. Puedes iniciar una nueva carrera con /crear-jugador o /dt crear' });
+
+  if (verdict.trophies.length > 0) {
+    embed.addFields({
+      name: '🏆 Vitrina de Trofeos',
+      value: verdict.trophies.map(t => `• ${t}`).join('\n').slice(0, 1000)
+    });
+  }
+
+  return {
+    ok: true,
+    ephemeral: false,
+    embeds: [embed],
+    components: []
+  };
+}
+
 module.exports = {
   simulateStep,
   simulateEntireSeason,
@@ -1862,5 +2203,14 @@ module.exports = {
   offersRows,
   offersEmbed,
   flagFor,
-  cupNameFor
+  cupNameFor,
+  // DT methods
+  dtContinueRow,
+  dtSimulateStep,
+  dtSimulateEntireSeason,
+  dtTableView,
+  dtOffersView,
+  dtPanelView,
+  dtRetireAction,
+  dtAcceptOfferAction
 };
