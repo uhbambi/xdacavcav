@@ -17,6 +17,12 @@ const {
 const { createMinigame, minigameDef, resolveMinigame } = require('../utils/minigames.js');
 const { maybePickMomento, maybePickCareerEvent, applyEffect, MOMENTOS, EVENTOS_CARRERA } = require('../utils/decisions.js');
 const { reputation, SHOP_ITEMS, buyItem, trainSkill, retirementVerdict, calculateSalary } = require('../utils/player.js');
+const { recordMatchResult, getStreakBonuses, getStreakStatus } = require('../utils/streaks.js');
+const { isClassicMatch, getClassicData } = require('../utils/classics.js');
+const { generateSeasonObjective, checkSeasonObjective } = require('../utils/seasonObjectives.js');
+const { initializeBallonDOrVote, registerVote, closeBallonDOrVote, applyBallonDOrRewards } = require('../utils/ballonDor.js');
+const { checkRetirementAge, setupRetirementCeremony, applyRetirementCeremonyBonuses, generateRetirementEmbed } = require('../utils/retirement.js');
+const { newManager, transitionPlayerToManager, simulateDTMatch, calculateTeamChemistryAndRating, generatePressConference } = require('../utils/manager.js');
 
 function flagFor(country) {
   return FLAGS[country] || '';
@@ -565,6 +571,25 @@ function playLeagueMatch(userId, player, tacticKey, bonus) {
   const opponentClub = findClub(opponentName);
   const club = findClub(player.club);
 
+  // Bonus de Clásico Histórico
+  const classicData = getClassicData(player.club, opponentName);
+  if (classicData) {
+    bonus = {
+      ...bonus,
+      ratingBonus: (bonus.ratingBonus || 0) + classicData.ratingBonus,
+      isClassic: true
+    };
+  }
+
+  // Bonus de Rachas (🔥 Racha ganadora o 📉 Pánico)
+  const streakBonuses = getStreakBonuses(player);
+  if (streakBonuses && streakBonuses.ratingBonus) {
+    bonus = {
+      ...bonus,
+      ratingBonus: (bonus.ratingBonus || 0) + streakBonuses.ratingBonus
+    };
+  }
+
   const result = simulateMatch(player, club, opponentClub, tacticKey, bonus);
   if (bonus.bonusAssists) {
     result.playerAssists += bonus.bonusAssists;
@@ -577,17 +602,23 @@ function playLeagueMatch(userId, player, tacticKey, bonus) {
   }
 
   applyMatchToPlayer(player, result);
+  recordMatchResult(player, result.result);
   updateTable(player.table, player.club, result.myGoals, result.oppGoals);
   updateTable(player.table, opponentName, result.oppGoals, result.myGoals);
   simulateOtherRoundMatches(player, roundIndex);
   player.matchdayIndex += 1;
 
   const league = getLeague(player.leagueKey);
+  const streakInfo = getStreakStatus(player);
+  const classicTag = classicData ? `🔥 ¡${classicData.name}! ` : '';
+  const streakTag = streakInfo && streakInfo.emoji !== '➖' ? ` ${streakInfo.emoji}` : '';
+
   const embed = matchEmbed(
-    `${flagFor(league.country)} ${league.name} · Fecha ${player.matchdayIndex}/${player.fixture.length}`,
+    `${classicTag}${flagFor(league.country)} ${league.name} · Fecha ${player.matchdayIndex}/${player.fixture.length}${streakTag}`,
     result.result === 'V' ? 0x2ecc71 : result.result === 'E' ? 0xf1c40f : 0xe74c3c,
     player.club,
-    result
+    result,
+    classicData ? `⚔️ **Clásico Histórico**: ${result.result === 'V' ? '¡Victoria épica que alegra a toda la hinchada! (+30% sueldo y +5 moral)' : result.result === 'D' ? 'Dolorosa derrota en el clásico (-5 moral).' : 'Empate con cuchillo entre los dientes.'}` : null
   );
 
   const momento = maybePickMomento();
@@ -878,14 +909,37 @@ function finishSeasonFlow(userId, player, leadingDesc) {
       `\n\n💰 Salario anual cobrado: **${(player.salary || 50000).toLocaleString('en-US')}** · Saldo en cuenta: **${(player.bank || 0).toLocaleString('en-US')}**`
     );
 
-  // Retiro obligatorio a los 42 años o si decidió retirarse
+  // Evaluación de objetivos de temporada
+  if (player.currentObjective) {
+    const table = standingsSorted(player.table || []);
+    const posIndex = table.findIndex(t => t.club === player.club);
+    const position = posIndex + 1;
+    const isCompleted = checkSeasonObjective(player, player.currentObjective, table, position);
+    if (isCompleted) {
+      const bonusPay = Math.round((player.salary || 50000) * 0.2);
+      player.bank = (player.bank || 0) + bonusPay;
+      player.morale = Math.min(100, (player.morale || 75) + 8);
+      leadingDesc += `\n\n🎯 **Objetivo de la Directiva CUMPLIDO:** ${player.currentObjective.rewardText(player)} (+💰 $${bonusPay.toLocaleString('en-US')} bonus)`;
+    } else {
+      player.morale = Math.max(10, (player.morale || 75) - 4);
+      leadingDesc += `\n\n⚠️ **Objetivo de la Directiva NO alcanzado:** La dirigencia esperaba mayor protagonismo.`;
+    }
+  }
+
+  // Generar nuevo objetivo para la siguiente temporada
+  const currentLeague = getLeague(player.leagueKey);
+  if (currentLeague) {
+    player.currentObjective = generateSeasonObjective(player, currentLeague);
+  }
+
+  // Retiro a los 42 años o voluntario
   if (player.retired || player.age >= 42) {
     player.retired = true;
     storage.setPlayer(userId, player);
     const verdict = retirementVerdict(player);
     const retireEmbed = new EmbedBuilder()
       .setColor(0xf1c40f)
-      .setTitle(`👑 ¡CARRERA FINALIZADA! — ${player.name}`)
+      .setTitle(`👑 ¡CARRERA FINALIZADA A LOS ${player.age} AÑOS! — ${player.name}`)
       .setDescription(
         `🏆 **Rango de Leyenda:** ${verdict.title}\n\n` +
         `*"${verdict.summary}"*\n\n` +
@@ -895,10 +949,12 @@ function finishSeasonFlow(userId, player, leadingDesc) {
         `• Selección Nacional: **${player.career.caps}** PJ / **${player.career.nationalGoals}** goles\n` +
         `• Títulos Ganados: **${player.career.trophies.length}**\n` +
         `• Premios Individuales: **${player.career.awards.length}**\n` +
-        `• Fortuna Acumulada: **${(player.bank || 0).toLocaleString('en-US')}**\n\n` +
+        `• Fortuna Acumulada: **$${(player.bank || 0).toLocaleString('en-US')}**\n\n` +
         (player.career.trophies.length ? `🏆 **Títulos:**\n${player.career.trophies.slice(0, 10).map(t => `• ${t}`).join('\n')}\n\n` : '') +
         (player.career.awards.length ? `🏅 **Premios:**\n${player.career.awards.slice(0, 10).map(a => `• ${a}`).join('\n')}\n\n` : '') +
-        `¡Gracias por escribir tu historia! Puedes iniciar una nueva aventura con \`/crear-jugador\`.`
+        `👔 **¿Cuál es tu siguiente paso?**\n` +
+        `• Puedes asumir como **Director Técnico (DT)** en tu club con \`/dt\` o desde el panel web.\n` +
+        `• O iniciar una nueva dinastía con \`/crear-jugador\`.`
       );
     return { ok: true, ephemeral: false, embeds: [embed, retireEmbed], components: [] };
   }
