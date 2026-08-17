@@ -111,6 +111,7 @@ function newPlayer({ name, position, nationalityLeagueKey }) {
     realEstateCount: 0,
     supercarPurchased: false,
     club: club.name,
+    originClub: club.name,
     clubMedia: club.media,
     clubTier: club.tier,
     leagueKey: club.leagueKey,
@@ -247,7 +248,8 @@ function normalizePlayer(player) {
   if (typeof player.releaseClause !== 'number') player.releaseClause = calculateReleaseClause(player, player.marketValue);
   if (typeof player.contractYears !== 'number') player.contractYears = rand(2, 4);
 
-  if (!Array.isArray(player.inventory)) player.inventory = [];
+  if (!player.originClub) player.originClub = player.club;
+  if (!player.inventory) player.inventory = [];
   if (typeof player.trainingsThisWeek !== 'number') player.trainingsThisWeek = 0;
   if (player.mansionPurchased === undefined) player.mansionPurchased = false;
   if (player.trainerPurchased === undefined) player.trainerPurchased = false;
@@ -308,14 +310,15 @@ function developPlayer(player) {
   if (clubMedia >= 82) points += 2;
   else if (clubMedia >= 74) points += 1;
 
-  // Curva de edad suavizada para permitir jugar hasta los 41 o 42 años
+  // Curva de edad: a partir de los 34 años comienza el declive físico y de nivel
   if (player.age <= 21) points += 3;
   else if (player.age <= 24) points += 2;
   else if (player.age <= 27) points += 1;
-  else if (player.age >= 39) points -= 4; // veterano de mil batallas
-  else if (player.age >= 36) points -= 3;
-  else if (player.age >= 33) points -= 2;
-  else if (player.age >= 30) points -= 1;
+  else if (player.age >= 40) points -= 6;
+  else if (player.age >= 38) points -= 5;
+  else if (player.age >= 36) points -= 4;
+  else if (player.age >= 34) points -= 3;
+  else if (player.age >= 31) points -= 1;
 
   // Bonos de inversión personal
   if (player.trainerPurchased) points += 2;
@@ -323,6 +326,13 @@ function developPlayer(player) {
 
   if (player.morale >= 80) points += 1;
   if (player.morale <= 30) points -= 1;
+
+  // Caída física adicional para veteranos de 34+
+  if (player.age >= 34) {
+    const physLoss = player.trainerPurchased ? 1 : rand(1, 3);
+    if (player.attributes.ritmo) player.attributes.ritmo = Math.max(25, player.attributes.ritmo - physLoss);
+    if (player.attributes.fisico && Math.random() < 0.6) player.attributes.fisico = Math.max(25, player.attributes.fisico - 1);
+  }
 
   // Cuanto mas cerca del techo, mas cuesta subir
   const room = player.potential - player.overall;
@@ -338,6 +348,9 @@ function developPlayer(player) {
   const gained = distributeGrowth(player.attributes, player.position, points, player.trainingFocus);
   const before = player.overall;
   player.overall = Math.min(player.potential, overallFrom(player.attributes, player.position));
+  if (player.age >= 34) {
+    player.potential = Math.min(player.potential, Math.max(player.overall, player.overall + 1));
+  }
   player.age += 1;
 
   // Actualización de economía
@@ -458,12 +471,23 @@ function trainSkill(player, skillKey) {
  * cuando vos tenis 53), sorteados al azar entre todas las ligas y divisiones.
  */
 function generateOffers(player, { count = null } = {}) {
-  const level = player.overall + reputation(player) * 0.5;
+  const isVeteran = player.age >= 34;
+  const level = isVeteran ? (player.overall - 3) : (player.overall + reputation(player) * 0.5);
   const currentLeague = getLeague(player.leagueKey);
   const currentLevel = currentLeague ? currentLeague.level : 1;
 
   const eligible = getAllClubs().filter(c => {
     if (c.name === player.club) return false;
+    
+    // Si eres veterano (34+ años), los clubes gigantes prefieren no ficharte salvo que seas súper estrella
+    if (isVeteran) {
+      if (c.media >= 82 && player.overall < 84) return false;
+      if (c.media >= 78 && player.overall < 76) return false;
+      // Los clubes más chicos y humildes te buscan con los brazos abiertos
+      if (c.media > player.overall + 1) return false;
+      return true;
+    }
+
     // No te ficha un club cuyo plantel es mucho mejor que vos...
     if (c.media > level + 3) return false;
     // ...ni uno mucho peor (no vas a bajar 15 puntos de media por gusto)
@@ -476,14 +500,36 @@ function generateOffers(player, { count = null } = {}) {
     return true;
   });
 
-  if (!eligible.length) return [];
+  const chosen = [];
 
-  // Sorteo aleatorio con sesgo hacia los clubes mas grandes que te pueden fichar
-  const pool = eligible.map(c => ({ club: c, weight: Math.pow(Math.max(1, c.media - (level - 15)), 1.6) * Math.random() }));
+  // Oferta especial del CLUB FORMADOR / ORIGEN para veteranos de 34+
+  if (isVeteran && player.originClub && player.originClub !== player.club) {
+    const originClubObj = getAllClubs().find(c => c.name === player.originClub);
+    if (originClubObj) {
+      chosen.push({
+        ...originClubObj,
+        isOriginClub: true,
+        originNote: '🏠 ¡Tu club formador sueña con tu regreso para que te retires como ídolo!'
+      });
+    }
+  }
+
+  if (!eligible.length && !chosen.length) return [];
+
+  // Sorteo aleatorio: si es veterano, se le da mayor peso a clubes más enanos y formativos
+  const pool = eligible.map(c => {
+    let weight;
+    if (isVeteran) {
+      // Favorece clubes chicos y ligas locales/nacionales
+      weight = Math.pow(Math.max(1, 80 - c.media), 1.3) * Math.random();
+    } else {
+      weight = Math.pow(Math.max(1, c.media - (level - 15)), 1.6) * Math.random();
+    }
+    return { club: c, weight };
+  });
   pool.sort((a, b) => b.weight - a.weight);
 
   const wanted = (count || rand(3, 5)) + (player.extraOffers || 0) + (player.superagentPurchased ? 1 : 0);
-  const chosen = [];
 
   // Si pediste escuchar a Arabia, siempre entra un club saudi a la lista
   if (player.saudiOffer) {
