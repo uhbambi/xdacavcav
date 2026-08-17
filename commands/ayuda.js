@@ -32,6 +32,7 @@ module.exports = {
         '• `/salon-fama` — 🏛️ Salón de la Fama con las máximas leyendas inmortalizadas.\n' +
         '• `/tienda` — 🛒 Compra mansiones, fisios VIP, chefs, superagentes e inmuebles.\n' +
         '• `/premios` — 🏅 Balón de Oro, The Best, Golden Boy, Trofeo Yashin, Botas de Oro.\n' +
+        '• `/vitrina` — 🏆 Tu vitrina de trofeos: títulos colectivos y premios individuales.\n' +
         '• `/votar-ballon-dor` — 🗳️ Gala comunitaria de votación del Balón de Oro.\n' +
         '• `/clasicos` / `/rivalidades` — ⚔️ Clásicos históricos y duelos directos con otros jugadores.\n\n' +
         '**👔 MODO DIRECTOR TÉCNICO (DT):**\n' +

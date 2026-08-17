@@ -1518,19 +1518,19 @@ function reputationView(userId) {
   }
 
   const rep = getReputationSummary(player);
-  const pers = player.personality || { name: 'Profesional Equilibrado', emoji: '⚽', desc: 'Dedicado y constante' };
+  const pers = player.personality || { name: 'Profesional Equilibrado', emoji: '⚽', description: 'Dedicado y constante' };
 
   const embed = new EmbedBuilder()
     .setColor(0xe67e22)
     .setTitle(`📈 Reputación, Fama & Prensa — ${player.name}`)
     .setDescription(
       `🎭 **Rasgo de Personalidad:** ${pers.emoji} **${pers.name}**\n` +
-      `*${pers.desc}*\n\n` +
+      `*${pers.description}*\n\n` +
       `📊 **Métricas Mediáticas:**\n` +
       `• **Reputación:** ⭐ **${rep.reputation}/99** (Nivel de respeto deportivo global)\n` +
       `• **Popularidad:** 🔥 **${rep.popularity}/99** (Seguidores, marcas y valor comercial)\n` +
       `• **Prestigio:** 👑 **${rep.prestige}/99** (Peso histórico en grandes torneos)\n` +
-      `• **Estatus Mediático:** **${rep.tierLabel}**\n\n` +
+      `• **Estatus Mediático:** **${rep.tierLabel}** — *${rep.tierDesc}*\n\n` +
       `🎙️ **Veredicto de la Prensa:**\n` +
       `*"${rep.pressQuote}"*`
     );
@@ -2016,6 +2016,97 @@ function awardsView(userId) {
   } else {
     embed.addFields({ name: '🏅 Premios Individuales', value: 'Sigue brillando en los partidos para ganar el Balón de Oro, Bota de Oro o Trofeo Yashin.' });
   }
+
+  const components = (!player.retired && player.stage !== 'entretemporada') ? [continueRow(userId)] : [];
+  return { ok: true, ephemeral: false, embeds: [embed], components };
+}
+
+/** Vitrina de Trofeos: títulos colectivos y premios individuales (jugador y DT) */
+function vitrinaView(userId) {
+  const player = storage.getPlayer(userId);
+
+  // ── Modo Director Técnico ──
+  if (!player) {
+    const manager = storage.getManager(userId);
+    if (!manager) return noPlayer();
+
+    const trophies = manager.trophies || [];
+    const totalMatches = manager.records?.matches || 0;
+    const wins = manager.records?.wins || 0;
+
+    let nivel;
+    if (trophies.length >= 8) nivel = '👑 Vitrina de Leyenda de los Banquillos';
+    else if (trophies.length >= 5) nivel = '⭐ Vitrina de Estratega Consagrado';
+    else if (trophies.length >= 3) nivel = '🏆 Vitrina de Técnico Campeón';
+    else if (trophies.length >= 1) nivel = '🥈 Vitrina Inaugurada';
+    else nivel = '📋 Vitrina en Blanco (aún sin trofeos)';
+
+    const embed = new EmbedBuilder()
+      .setColor(0xf1c40f)
+      .setTitle(`🏆 Vitrina de Trofeos — DT ${manager.name}`)
+      .setDescription(
+        `**Club actual:** ${manager.club} (${manager.leagueName || 'Liga'})\n` +
+        `**Trayectoria:** ${totalMatches} partidos dirigidos · ${wins} victorias\n\n` +
+        `🏛️ **${nivel}**\n` +
+        `🏆 Títulos conseguidos: **${trophies.length}**\n` +
+        `⭐ Reputación: **${Math.round(manager.reputation || 50)}/99**`
+      );
+
+    if (trophies.length) {
+      embed.addFields({
+        name: `🏆 Títulos en el Palmarés (${trophies.length})`,
+        value: trophies.map(t => `• ${t}`).join('\n').slice(0, 1024)
+      });
+    } else {
+      embed.addFields({ name: '🏆 Títulos en el Palmarés', value: 'Tu vitrina está esperando su primer trofeo. ¡La directiva y la hinchada confían en vos!' });
+    }
+
+    return { ok: true, ephemeral: false, embeds: [embed], components: [dtContinueRow(userId, manager)] };
+  }
+
+  // ── Modo Jugador ──
+  const trophies = player.career.trophies || [];
+  const awards = player.career.awards || [];
+  const caps = player.career.caps || 0;
+  const nationalGoals = player.career.nationalGoals || 0;
+
+  let nivel;
+  if (trophies.length >= 12) nivel = '👑 Vitrina de Leyenda Absoluta';
+  else if (trophies.length >= 8) nivel = '🏆 Vitrina Dorada';
+  else if (trophies.length >= 5) nivel = '🥇 Vitrina de Ídolo';
+  else if (trophies.length >= 2) nivel = '🥈 Vitrina de Campeón';
+  else if (trophies.length >= 1) nivel = '🥉 Vitrina Inaugurada';
+  else nivel = '🪟 Vitrina en Blanco';
+
+  const embed = new EmbedBuilder()
+    .setColor(0xf1c40f)
+    .setTitle(`🏆 Vitrina de Trofeos — ${player.name}`)
+    .setDescription(
+      `${player.retired ? '🏅 Leyenda retirada.' : `Temporada ${player.season} · ${player.club}`} · ${player.age} años · Media **${player.overall}**\n\n` +
+      `🏛️ **${nivel}**\n` +
+      `🏆 Títulos colectivos: **${trophies.length}** · 🏅 Premios individuales: **${awards.length}**\n` +
+      `⚽ ${player.career.goals} goles · 🅰️ ${player.career.assists} asistencias · 🇨🇱 ${caps} PJ / ${nationalGoals} goles con la selección`
+    );
+
+  if (trophies.length) {
+    embed.addFields({
+      name: `🏆 Títulos Colectivos (${trophies.length})`,
+      value: trophies.map(t => `• ${t}`).join('\n').slice(0, 1024)
+    });
+  } else {
+    embed.addFields({ name: '🏆 Títulos Colectivos', value: 'Tu vitrina todavía no tiene trofeos. ¡Seguí peleando ligas, copas y el Mundial!' });
+  }
+
+  if (awards.length) {
+    embed.addFields({
+      name: `🏅 Premios Individuales (${awards.length})`,
+      value: awards.map(a => `• ${a}`).join('\n').slice(0, 1024)
+    });
+  } else {
+    embed.addFields({ name: '🏅 Premios Individuales', value: 'Sin premios individuales todavía. Brilla en los partidos grandes para ganar el Balón de Oro, la Bota de Oro o el Trofeo Yashin.' });
+  }
+
+  embed.setFooter({ text: 'Cada título y premio que ganes quedará exhibido acá para siempre.' });
 
   const components = (!player.retired && player.stage !== 'entretemporada') ? [continueRow(userId)] : [];
   return { ok: true, ephemeral: false, embeds: [embed], components };
@@ -2858,12 +2949,14 @@ function dtSquadView(userId) {
   const starters = xiIds.map(id => squad.find(p => p.id === id)).filter(Boolean);
   const bench = squad.filter(p => !xiIds.includes(p.id));
 
+  const energyOf = (p) => (typeof p.energy === 'number' ? p.energy : (typeof p.stamina === 'number' ? p.stamina : 100));
+
   const startersText = starters.map((p, i) =>
-    `\`#${i + 1}\` **${p.name}** (${p.position}) — Media: **${p.overall}** | Moral: ${p.morale}% | Energía: ${p.energy}% | ⚽ ${p.goals} 🅰️ ${p.assists}`
+    `\`#${i + 1}\` **${p.name}** (${p.position}) — Media: **${p.overall}** | Moral: ${p.morale}% | Energía: ${energyOf(p)}% | ⚽ ${p.goals} 🅰️ ${p.assists}`
   ).join('\n');
 
   const benchText = bench.slice(0, 15).map(p =>
-    `• **${p.name}** (${p.position} ${p.overall}) — Energía: ${p.energy}% | Sueldo: ${(p.wage || 5000).toLocaleString('en-US')}`
+    `• **${p.name}** (${p.position} ${p.overall}) — Energía: ${energyOf(p)}% | Sueldo: ${(p.wage || 5000).toLocaleString('en-US')}`
   ).join('\n');
 
   const embed = new EmbedBuilder()
@@ -2915,21 +3008,34 @@ function dtTacticView(userId, newFormation, newStyle) {
       .setColor(0x2ecc71)
       .setTitle(`📋 Táctica Actualizada · ${manager.club}`)
       .setDescription(
-        `✅ Formación: **${res.formation}**\n` +
-        `✅ Estilo de Juego: **${res.style}** (${TACTICAL_STYLES[res.style]?.label || res.style})\n\n` +
-        `*${TACTICAL_STYLES[res.style]?.desc || ''}*`
+        `✅ Formación: **${res.formation}** (${res.formationName})\n` +
+        `✅ Estilo de Juego: **${res.styleName}**\n\n` +
+        `*${TACTICAL_STYLES[res.tacticStyle]?.desc || ''}*`
       );
     return { ok: true, ephemeral: false, embeds: [embed], components: [dtContinueRow(userId, manager)] };
   }
 
-  const formList = Object.entries(FORMATIONS).map(([k, v]) => `• **${k}**: ${v.def} DEF - ${v.mid} MED - ${v.att} DEL`).join('\n');
-  const styleList = Object.entries(TACTICAL_STYLES).map(([k, v]) => `• **${k}** (${v.label}): ${v.desc}`).join('\n');
+  const countLines = (slots) => {
+    let def = 0;
+    let mid = 0;
+    let att = 0;
+    for (const s of slots) {
+      if (s.id === 'POR') continue;
+      if (/^(DF|CA|LIB)/.test(s.id)) def++;
+      else if (/^(MC|MI|MD|MCD|MCO)/.test(s.id)) mid++;
+      else att++;
+    }
+    return `${def} DEF - ${mid} MED - ${att} DEL`;
+  };
+
+  const formList = Object.entries(FORMATIONS).map(([k, v]) => `• **${k}**: ${countLines(v.slots)}`).join('\n');
+  const styleList = Object.entries(TACTICAL_STYLES).map(([k, v]) => `• **${k}** (${v.name}): ${v.desc}`).join('\n');
 
   const embed = new EmbedBuilder()
     .setColor(0x34495e)
     .setTitle(`📋 Pizarra Táctica & Estrategia · DT ${manager.name}`)
     .setDescription(
-      `Formación actual: **${manager.formation}** | Estilo: **${TACTICAL_STYLES[manager.tacticStyle]?.label || manager.tacticStyle}**\n\n` +
+      `Formación actual: **${manager.formation}** | Estilo: **${TACTICAL_STYLES[manager.tacticStyle]?.name || manager.tacticStyle}**\n\n` +
       `📐 **Formaciones Disponibles:**\n${formList}\n\n` +
       `🧠 **Estilos Tácticos:**\n${styleList}\n\n` +
       `💡 Para cambiar usa: \`/dt tactica [formacion] [estilo]\``
@@ -2954,8 +3060,8 @@ function dtTeamTalkView(userId, talkId) {
         `**DT ${manager.name}:** *"${res.talk.text}"*\n\n` +
         `💬 **Efecto en el Plantel:**\n` +
         `• Reacción: ${res.talk.desc}\n` +
-        `• Modificador de Moral: **+${res.talk.moraleBoost}**\n` +
-        `• Foco Táctico: **+${res.talk.focusBoost}%**`
+        `• Modificador de Moral: **${res.talk.morale >= 0 ? '+' : ''}${res.talk.morale}**\n` +
+        `• Foco Táctico: **+${res.talk.focusBoost || 0}%** para el próximo partido`
       );
     return { ok: true, ephemeral: false, embeds: [embed], components: [dtContinueRow(userId, manager)] };
   }
@@ -3302,6 +3408,7 @@ module.exports = {
   trainView,
   trainSkillAction,
   awardsView,
+  vitrinaView,
   continueRow,
   shootoutRow,
   shootoutEmbed,

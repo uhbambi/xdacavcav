@@ -310,7 +310,7 @@ function developPlayer(player) {
   if (clubMedia >= 82) points += 2;
   else if (clubMedia >= 74) points += 1;
 
-  // Curva de edad: a partir de los 34 años comienza el declive físico y de nivel
+  // Curva de edad: crecimiento hasta los 27, estancamiento 28-30 y declive desde los 34
   if (player.age <= 21) points += 3;
   else if (player.age <= 24) points += 2;
   else if (player.age <= 27) points += 1;
@@ -327,11 +327,21 @@ function developPlayer(player) {
   if (player.morale >= 80) points += 1;
   if (player.morale <= 30) points -= 1;
 
-  // Caída física adicional para veteranos de 34+
+  // ── DECLIVE DESDE LOS 34 AÑOS ──────────────────────────────────────────────
+  // A partir de los 34 la media baja sí o sí cada temporada: se acabó el crecimiento.
   if (player.age >= 34) {
-    const physLoss = player.trainerPurchased ? 1 : rand(1, 3);
-    if (player.attributes.ritmo) player.attributes.ritmo = Math.max(25, player.attributes.ritmo - physLoss);
-    if (player.attributes.fisico && Math.random() < 0.6) player.attributes.fisico = Math.max(25, player.attributes.fisico - 1);
+    points = Math.min(points, -1);
+
+    // Intensidad del declive: leve a los 34, brusco a partir de los 40
+    let decline = player.age >= 40 ? 3 : player.age >= 38 ? 2 : 1;
+    // Inversiones que amortiguan (pero no eliminan) la caída
+    if (player.trainerPurchased) decline = Math.max(1, decline - 1);
+    if (player.chefPurchased) decline = Math.max(1, decline - 1);
+
+    // Lo primero que se pierde con la edad es lo físico (ritmo, físico) y luego el regate
+    if (player.attributes.ritmo != null) player.attributes.ritmo = Math.max(25, player.attributes.ritmo - decline * 3);
+    if (player.attributes.fisico != null) player.attributes.fisico = Math.max(25, player.attributes.fisico - decline * 2);
+    if (player.attributes.regate != null) player.attributes.regate = Math.max(25, player.attributes.regate - decline);
   }
 
   // Cuanto mas cerca del techo, mas cuesta subir
@@ -349,7 +359,8 @@ function developPlayer(player) {
   const before = player.overall;
   player.overall = Math.min(player.potential, overallFrom(player.attributes, player.position));
   if (player.age >= 34) {
-    player.potential = Math.min(player.potential, Math.max(player.overall, player.overall + 1));
+    // El techo ya no sube: el potencial se ancla a la media actual para garantizar el declive.
+    player.potential = Math.min(player.potential, player.overall);
   }
   player.age += 1;
 
@@ -481,10 +492,15 @@ function generateOffers(player, { count = null } = {}) {
     
     // Si eres veterano (34+ años), los clubes gigantes prefieren no ficharte salvo que seas súper estrella
     if (isVeteran) {
-      if (c.media >= 82 && player.overall < 84) return false;
-      if (c.media >= 78 && player.overall < 76) return false;
-      // Los clubes más chicos y humildes te buscan con los brazos abiertos
-      if (c.media > player.overall + 1) return false;
+      // La élite (media 82+) solo arriesga por verdaderas leyendas
+      if (c.media >= 82 && player.overall < 88) return false;
+      if (c.media >= 78 && player.overall < 78) return false;
+      // Con la edad las ofertas son de clubes peores que tu media actual:
+      // a los 34-37 te buscan un paso por debajo, y desde los 38 claramente más abajo.
+      const mediaCap = player.age >= 38 ? player.overall - 3 : player.overall - 1;
+      if (c.media > mediaCap) return false;
+      // Pero tampoco clubes ridículamente chicos: no te vas a jubilar en el sótano.
+      if (c.media < player.overall - 10) return false;
       return true;
     }
 
@@ -516,12 +532,12 @@ function generateOffers(player, { count = null } = {}) {
 
   if (!eligible.length && !chosen.length) return [];
 
-  // Sorteo aleatorio: si es veterano, se le da mayor peso a clubes más enanos y formativos
+  // Sorteo aleatorio: si es veterano, se le da mayor peso a clubes más humildes y formativos
   const pool = eligible.map(c => {
     let weight;
     if (isVeteran) {
-      // Favorece clubes chicos y ligas locales/nacionales
-      weight = Math.pow(Math.max(1, 80 - c.media), 1.3) * Math.random();
+      // Favorece clubes un escalón por debajo de tu media (peores, pero no ridículos)
+      weight = Math.pow(Math.max(1, (player.overall - 4) - c.media), 1.1) * Math.random();
     } else {
       weight = Math.pow(Math.max(1, c.media - (level - 15)), 1.6) * Math.random();
     }

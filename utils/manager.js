@@ -128,12 +128,48 @@ const TACTICAL_STYLES = {
   equilibrado: { name: 'Estilo Equilibrado', desc: 'Adaptación según el ritmo y el marcador del partido.', bonus: 'Balance completo' }
 };
 
-const CHARLAS_VESTUARIO = [
-  { id: 'motivacional', label: '🔥 Arenga Motivacional ("¡A dejar la vida en la cancha!")', morale: 6, stamina: -2, desc: 'Sube la intensidad y la moral del plantel.' },
-  { id: 'tactica', label: '📋 Indicación Táctica ("Concentración máxima en las marcas")', focus: 5, morale: 2, desc: 'Mejora el orden y reduce errores defensivos.' },
-  { id: 'tranquilidad', label: '🧘 Mensaje de Calma ("Jueguen sin presión, disfruten")', morale: 4, composure: 6, desc: 'Reduce el pánico ante rivales difíciles.' },
-  { id: 'exigencia', label: '⚡ Reto y Exigencia ("¡No los veo con hambre de ganar!")', morale: -2, aggression: 7, desc: 'Mete presión al equipo; útil si venían jugando flojo.' }
-];
+const CHARLAS_VESTUARIO = {
+  motivacional: {
+    id: 'motivacional',
+    title: 'Arenga Motivacional',
+    text: '¡A dejar la vida en la cancha, muchachos!',
+    label: '🔥 Arenga Motivacional',
+    morale: 6,
+    stamina: -2,
+    focusBoost: 0,
+    desc: 'Sube la intensidad y la moral del plantel.'
+  },
+  tactica: {
+    id: 'tactica',
+    title: 'Indicación Táctica',
+    text: 'Concentración máxima en las marcas y en la salida.',
+    label: '📋 Indicación Táctica',
+    focus: 5,
+    morale: 2,
+    focusBoost: 5,
+    desc: 'Mejora el orden y reduce errores defensivos.'
+  },
+  tranquilidad: {
+    id: 'tranquilidad',
+    title: 'Mensaje de Calma',
+    text: 'Jueguen sin presión, disfruten del partido.',
+    label: '🧘 Mensaje de Calma',
+    morale: 4,
+    composure: 6,
+    focusBoost: 3,
+    desc: 'Reduce el pánico ante rivales difíciles.'
+  },
+  exigencia: {
+    id: 'exigencia',
+    title: 'Reto y Exigencia',
+    text: '¡No los veo con hambre de ganar!',
+    label: '⚡ Reto y Exigencia',
+    morale: -2,
+    aggression: 7,
+    focusBoost: 4,
+    desc: 'Mete presión al equipo; útil si venían jugando flojo.'
+  }
+};
 
 // Nombres y apellidos realistas para generación de jugadores del plantel
 const FIRST_NAMES = ['Matías', 'Lucas', 'Nicolás', 'Santiago', 'Joaquín', 'Rodrigo', 'Facundo', 'Lautaro', 'Enzo', 'Julián', 'Federico', 'Thiago', 'Benjamín', 'Gabriel', 'Ignacio', 'Esteban', 'Diego', 'Bruno', 'Emiliano', 'Gonzalo', 'Maximiliano', 'Alexis', 'Arturo', 'Cristian', 'Álvaro', 'Felipe', 'Tomás', 'Marcos', 'Agustín', 'Mauro'];
@@ -214,6 +250,7 @@ function generateClubSquad(club) {
       attributes,
       morale: rand(70, 95),
       stamina: 100,
+      energy: 100,
       form: rand(6, 9),
       goals: 0,
       assists: 0,
@@ -425,11 +462,14 @@ function simulateDTMatch(manager, opponentName, teamTalk = null, inGameTactics =
   const myRating = teamMetrics.effectiveRating;
   const oppRating = opponentClub.media || 68;
 
-  // Modificadores de charla de vestuario
-  let moraleDelta = 0;
+  // Modificadores de charla de vestuario: si no se pasa una explícita, se consume
+  // la charla guardada por el DT (efecto de un solo partido).
+  if (!teamTalk) {
+    teamTalk = manager.lastTeamTalk || null;
+    manager.lastTeamTalk = null;
+  }
   let tacticalBoost = 0;
   if (teamTalk) {
-    moraleDelta += teamTalk.morale || 0;
     tacticalBoost += (teamTalk.focus || 0) + (teamTalk.composure || 0);
   }
 
@@ -556,10 +596,21 @@ function simulateDTMatch(manager, opponentName, teamTalk = null, inGameTactics =
   if (manager.recentForm.length > 5) manager.recentForm.pop();
 
   // Actualizar estadísticas de partidos jugados de los titulares
+  const xiIds = new Set(xi.map(p => p.id));
   xi.forEach(p => {
     p.apps = (p.apps || 0) + 1;
-    p.morale = Math.max(10, Math.min(100, p.morale + moraleDelta + (result === 'V' ? 4 : result === 'E' ? 0 : -4)));
-    p.stamina = Math.max(50, p.stamina - rand(8, 15));
+    p.morale = Math.max(10, Math.min(100, p.morale + (result === 'V' ? 4 : result === 'E' ? 0 : -4)));
+    const energy = typeof p.energy === 'number' ? p.energy : (typeof p.stamina === 'number' ? p.stamina : 100);
+    p.energy = Math.max(35, energy - rand(8, 15));
+    p.stamina = p.energy;
+  });
+
+  // Los suplentes y reservas recuperan energía entre partidos
+  (manager.squad || []).forEach(p => {
+    if (xiIds.has(p.id)) return;
+    const energy = typeof p.energy === 'number' ? p.energy : (typeof p.stamina === 'number' ? p.stamina : 100);
+    p.energy = Math.min(100, energy + rand(12, 20));
+    p.stamina = p.energy;
   });
 
   // Solo los partidos de LIGA avanzan el calendario y la tabla de posiciones.
@@ -1219,10 +1270,11 @@ function autoLineupSquad(manager) {
 
   const startingIds = starting.slice(0, 11).map(p => p.id);
   const benchIds = squad.filter(p => !startingIds.includes(p.id)).map(p => p.id);
+  const avgOvr = starting.length ? Math.round(starting.reduce((sum, p) => sum + (p.overall || 60), 0) / starting.length) : 60;
 
   manager.startingXI = startingIds;
   manager.bench = benchIds;
-  return { ok: true, startingCount: startingIds.length, benchCount: benchIds.length };
+  return { ok: true, startingCount: startingIds.length, benchCount: benchIds.length, avgOvr };
 }
 
 /**
@@ -1249,7 +1301,7 @@ function changeManagerTactic(manager, formationKey, styleKey) {
  * Aplica una charla técnica de vestuario
  */
 function deliverTeamTalk(manager, talkId) {
-  const talk = CHARLAS_VESTUARIO.find(t => t.id === talkId) || CHARLAS_VESTUARIO[0];
+  const talk = CHARLAS_VESTUARIO[talkId] || CHARLAS_VESTUARIO.motivacional;
   manager.lastTeamTalk = {
     id: talk.id,
     label: talk.label,
@@ -1259,6 +1311,8 @@ function deliverTeamTalk(manager, talkId) {
     appliedAt: Date.now()
   };
 
+  // La moral se aplica de inmediato a todo el plantel; el foco táctico/composure
+  // se guarda y se consume en el próximo partido (simulateDTMatch).
   (manager.squad || []).forEach(p => {
     p.morale = Math.max(10, Math.min(100, (p.morale || 70) + (talk.morale || 0)));
   });
@@ -1296,6 +1350,7 @@ function getTransferMarketForManager(manager) {
       marketValue: baseValue,
       wage,
       stamina: rand(85, 100),
+      energy: rand(85, 100),
       morale: rand(75, 95),
       goals: 0,
       assists: 0
@@ -1367,6 +1422,7 @@ function promoteYouthForManager(manager) {
     marketValue: Math.round(Math.pow(ovr / 10, 3) * 60000 + 400000),
     wage: 25000,
     stamina: 100,
+    energy: 100,
     morale: 95,
     goals: 0,
     assists: 0,

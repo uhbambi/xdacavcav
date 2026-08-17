@@ -16,6 +16,7 @@ Toda la carrera se juega con **botones** — después de crear tu jugador casi n
 | `/perfil` | Ficha de tu jugador, stats, atributos y vitrina |
 | `/atributos` | Tus atributos tipo FIFA (ritmo, tiro, pase, regate, defensa, físico) |
 | `/transferir` | En el mercado de pases: revisa ofertas y elige club |
+| `/vitrina` | Tu vitrina de trofeos: títulos colectivos y premios individuales |
 | `/retirar` | Termina tu carrera y recibe el veredicto final |
 | `/ayuda` | Resumen de cómo jugar |
 
