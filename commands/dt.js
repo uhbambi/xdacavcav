@@ -33,6 +33,16 @@ module.exports = {
     )
     .addSubcommand(sub =>
       sub
+        .setName('simular-partido')
+        .setDescription('Simular el próximo partido oficial de liga en Modo DT')
+    )
+    .addSubcommand(sub =>
+      sub
+        .setName('partido')
+        .setDescription('Simular el próximo partido oficial de liga en Modo DT')
+    )
+    .addSubcommand(sub =>
+      sub
         .setName('simular-temporada')
         .setDescription('Simular una temporada completa de liga en Modo DT')
     )
@@ -148,150 +158,96 @@ module.exports = {
       return interaction.reply({ embeds: [embed], components: [engine.dtContinueRow(userId, manager)] });
     }
 
-    if (sub === 'simular') {
+    const sendSafeReply = async (res) => {
+      const payload = {};
+      if (res.content) payload.content = res.content;
+      if (res.embeds && res.embeds.length > 0) payload.embeds = res.embeds;
+      if (res.components && res.components.length > 0) payload.components = res.components;
+      if (res.ephemeral) payload.ephemeral = true;
+      if (!payload.content && (!payload.embeds || payload.embeds.length === 0)) {
+        payload.content = 'Comando ejecutado.';
+      }
+      return interaction.reply(payload);
+    };
+
+    if (sub === 'simular' || sub === 'simular-partido' || sub === 'partido') {
       const res = engine.dtSimulateStep(userId);
-      return interaction.reply({
-        content: res.content,
-        embeds: res.embeds,
-        components: res.components,
-        ephemeral: res.ephemeral
-      });
+      return sendSafeReply(res);
     }
 
     if (sub === 'simular-temporada') {
       const res = engine.dtSimulateEntireSeason(userId);
-      return interaction.reply({
-        content: res.content,
-        embeds: res.embeds,
-        components: res.components,
-        ephemeral: res.ephemeral
-      });
+      return sendSafeReply(res);
     }
 
     if (sub === 'panel') {
       const res = engine.dtPanelView(userId);
-      return interaction.reply({
-        content: res.content,
-        embeds: res.embeds,
-        components: res.components,
-        ephemeral: res.ephemeral
-      });
+      return sendSafeReply(res);
     }
 
     if (sub === 'plantilla') {
       const res = engine.dtSquadView(userId);
-      return interaction.reply({
-        content: res.content,
-        embeds: res.embeds,
-        components: res.components,
-        ephemeral: res.ephemeral
-      });
+      return sendSafeReply(res);
     }
 
     if (sub === 'alinear') {
       const res = engine.dtAutoLineupAction(userId);
-      return interaction.reply({
-        content: res.content,
-        embeds: res.embeds,
-        components: res.components,
-        ephemeral: res.ephemeral
-      });
+      return sendSafeReply(res);
     }
 
     if (sub === 'tactica') {
       const formation = interaction.options.getString('formacion');
       const style = interaction.options.getString('estilo');
       const res = engine.dtTacticView(userId, formation, style);
-      return interaction.reply({
-        content: res.content,
-        embeds: res.embeds,
-        components: res.components,
-        ephemeral: res.ephemeral
-      });
+      return sendSafeReply(res);
     }
 
     if (sub === 'charla') {
       const tipo = interaction.options.getString('tipo');
       const res = engine.dtTeamTalkView(userId, tipo);
-      return interaction.reply({
-        content: res.content,
-        embeds: res.embeds,
-        components: res.components,
-        ephemeral: res.ephemeral
-      });
+      return sendSafeReply(res);
     }
 
     if (sub === 'fichar') {
       const num = interaction.options.getInteger('numero');
       const res = engine.dtTransfersView(userId, num ? num - 1 : null);
-      return interaction.reply({
-        content: res.content,
-        embeds: res.embeds,
-        components: res.components,
-        ephemeral: res.ephemeral
-      });
+      return sendSafeReply(res);
     }
 
     if (sub === 'cantera') {
       const res = engine.dtYouthAcademyView(userId, true);
-      return interaction.reply({
-        content: res.content,
-        embeds: res.embeds,
-        components: res.components,
-        ephemeral: res.ephemeral
-      });
+      return sendSafeReply(res);
     }
 
     if (sub === 'copas') {
       const res = engine.dtCupsView(userId);
-      return interaction.reply({
-        content: res.content,
-        embeds: res.embeds,
-        components: res.components,
-        ephemeral: res.ephemeral
-      });
+      return sendSafeReply(res);
     }
 
     if (sub === 'tabla') {
       const res = engine.dtTableView(userId);
-      return interaction.reply({
-        content: res.content,
-        embeds: res.embeds,
-        components: res.components,
-        ephemeral: res.ephemeral
-      });
+      return sendSafeReply(res);
     }
 
     if (sub === 'ofertas') {
       const res = engine.dtOffersView(userId);
-      return interaction.reply({
-        content: res.content,
-        embeds: res.embeds,
-        components: res.components,
-        ephemeral: res.ephemeral
-      });
+      return sendSafeReply(res);
     }
 
     if (sub === 'aceptar') {
       const clubQuery = interaction.options.getString('club');
       const res = engine.dtAcceptOfferAction(userId, clubQuery);
-      return interaction.reply({
-        content: res.content,
-        embeds: res.embeds,
-        components: res.components,
-        ephemeral: res.ephemeral
-      });
+      return sendSafeReply(res);
     }
 
     if (sub === 'retirar') {
       const res = engine.dtRetireAction(userId);
-      return interaction.reply({
-        content: res.content,
-        embeds: res.embeds,
-        components: res.components,
-        ephemeral: res.ephemeral
-      });
+      return sendSafeReply(res);
     }
+
+    // Fallback garantizado para evitar timeouts
+    const fallbackRes = engine.dtPanelView(userId);
+    return sendSafeReply(fallbackRes);
   }
 };
 
