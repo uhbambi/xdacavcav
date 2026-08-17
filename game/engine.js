@@ -1248,7 +1248,11 @@ function offersView(userId) {
 
 function profileView(userId) {
   const player = storage.getPlayer(userId);
-  if (!player) return noPlayer();
+  if (!player) {
+    const manager = storage.getManager(userId);
+    if (manager) return dtPanelView(userId);
+    return noPlayer();
+  }
 
   const s = player.seasonStats;
   const avg = s.apps > 0 ? (s.avgRatingSum / s.apps).toFixed(2) : '—';
@@ -1338,7 +1342,24 @@ function profileView(userId) {
 /** 1. Vista de Lesiones y Gestión Médica */
 function injuryView(userId) {
   const player = storage.getPlayer(userId);
-  if (!player) return noPlayer();
+  if (!player) {
+    const manager = storage.getManager(userId);
+    if (manager) {
+      const injured = (manager.squad || []).filter(p => (p.injuredMatches || 0) > 0);
+      const embed = new EmbedBuilder()
+        .setColor(injured.length > 0 ? 0xe74c3c : 0x2ecc71)
+        .setTitle(`🩺 Informe Médico y Estado del Plantel — ${manager.club}`)
+        .setDescription(
+          `Cuerpo Médico de **${manager.club}** a cargo del DT **${manager.name}**:\n\n` +
+          (injured.length > 0
+            ? `🚑 **Jugadores en Enfermería (${injured.length}):**\n` +
+              injured.map(p => `• **${p.name}** (${p.position} ${p.overall}): ${p.injuredMatches} partido(s) de baja`).join('\n')
+            : '✅ **Todo el plantel está en óptimas condiciones físicas y disponible para jugar.**')
+        );
+      return { ok: true, ephemeral: false, embeds: [embed], components: [dtContinueRow(userId, manager)] };
+    }
+    return noPlayer();
+  }
 
   const risk = getInjuryRiskProfile(player);
   const status = formatInjuryStatus(player);
@@ -1398,7 +1419,27 @@ function injuryTreatAction(userId, treatmentType) {
 /** 2. Vista de Economía Detallada */
 function economyView(userId) {
   const player = storage.getPlayer(userId);
-  if (!player) return noPlayer();
+  if (!player) {
+    const manager = storage.getManager(userId);
+    if (manager) {
+      const wageBill = (manager.squad || []).reduce((acc, p) => acc + (p.wage || 1000), 0);
+      const embed = new EmbedBuilder()
+        .setColor(0x2ecc71)
+        .setTitle(`💰 Finanzas, Presupuesto y Fichajes — ${manager.club}`)
+        .setDescription(
+          `🏛️ **Club:** **${manager.club}** (${manager.leagueName || 'Liga'})\n` +
+          `👔 **Director Técnico:** **${manager.name}**\n\n` +
+          `💵 **Tesorería y Presupuesto:**\n` +
+          `• Presupuesto de Fichajes: 💰 **$${manager.budget.toLocaleString('en-US')}**\n` +
+          `• Masa Salarial del Plantel: 💸 **$${wageBill.toLocaleString('en-US')}/sem** (~$${(wageBill * 52).toLocaleString('en-US')}/año)\n` +
+          `• Confianza Financiera de la Directiva: 🏛️ **${manager.boardConfidence}%**\n` +
+          `• Jugadores en Plantilla: 👥 **${(manager.squad || []).length} futbolistas**\n\n` +
+          `💡 *Usa \`/dt fichar\` para explorar el mercado o \`/dt cantera\` para promover juveniles sin coste.*`
+        );
+      return { ok: true, ephemeral: false, embeds: [embed], components: [dtContinueRow(userId, manager)] };
+    }
+    return noPlayer();
+  }
 
   const netWorth = calculateNetWorth(player);
   const weeklyExpenses = calculateWeeklyExpenses(player);
@@ -1433,7 +1474,48 @@ function economyView(userId) {
 /** 3. Vista de Reputación y Personalidad */
 function reputationView(userId) {
   const player = storage.getPlayer(userId);
-  if (!player) return noPlayer();
+  if (!player) {
+    const manager = storage.getManager(userId);
+    if (manager) {
+      const rep = manager.reputation || 50;
+      let tierLabel = 'Director Técnico Prometedor 📋';
+      let pressQuote = 'Un estratega con ideas claras que busca consolidar su proyecto.';
+      if (rep >= 85) {
+        tierLabel = 'Director Técnico Clase Mundial 🌍👑';
+        pressQuote = 'Estratega de élite mundial codiciado por los gigantes del fútbol.';
+      } else if (rep >= 70) {
+        tierLabel = 'Entrenador de Gran Prestigio ⭐';
+        pressQuote = 'Reconocido por su solidez táctica y manejo del vestuario.';
+      } else if (rep >= 55) {
+        tierLabel = 'Director Técnico Consolidado ⚽';
+        pressQuote = 'Un entrenador respetado con buen predicamento en la liga.';
+      }
+
+      const embed = new EmbedBuilder()
+        .setColor(0xe67e22)
+        .setTitle(`📈 Reputación, Fama & Prestigio DT — ${manager.name}`)
+        .setDescription(
+          `👔 **Estatus de Entrenador:** **${tierLabel}**\n` +
+          `🏟️ **Club Actual:** **${manager.club}** (${manager.leagueName || 'Liga'})\n\n` +
+          `📊 **Métricas de Dirección Técnica:**\n` +
+          `• **Reputación Global:** ⭐ **${Math.round(rep)}/99** (Prestigio internacional)\n` +
+          `• **Confianza Directiva:** 🏛️ **${manager.boardConfidence || 75}%** (Respaldo de la junta)\n` +
+          `• **Apoyo de la Hinchada:** 📣 **${manager.fanConfidence || 75}%** (Cariño y respaldo popular)\n` +
+          `• **Esquema Predilecto:** 📋 **${manager.formation || '4-3-3'}** (${manager.tacticStyle || manager.tacticalStyle || 'equilibrado'})\n` +
+          `• **Títulos Oficiales:** 🏆 **${(manager.trophies || []).length} títulos**\n\n` +
+          `🎙️ **Veredicto de la Prensa Deportiva:**\n` +
+          `*"${pressQuote}"*`
+        );
+
+      return {
+        ok: true,
+        ephemeral: false,
+        embeds: [embed],
+        components: [dtContinueRow(userId, manager)]
+      };
+    }
+    return noPlayer();
+  }
 
   const rep = getReputationSummary(player);
   const pers = player.personality || { name: 'Profesional Equilibrado', emoji: '⚽', desc: 'Dedicado y constante' };
@@ -1511,7 +1593,23 @@ function nationalTeamView(userId) {
 /** 6. Vista de Redes Sociales */
 function socialFeedView(userId) {
   const player = storage.getPlayer(userId);
-  if (!player) return noPlayer();
+  if (!player) {
+    const manager = storage.getManager(userId);
+    if (manager) {
+      const embed = new EmbedBuilder()
+        .setColor(0x1da1f2)
+        .setTitle(`📱 Feed Social & Tendencias · @${manager.club.replace(/\s+/g, '_').toLowerCase()}`)
+        .setDescription(
+          `🔥 **Tendencias del Club & Reacciones de los Hinchas:**\n\n` +
+          `• 🐦 **@Hinchada_${manager.club.replace(/\s+/g, '')}:** "${manager.name} está manejando el equipo con mucha personalidad. ¡Vamos ${manager.club}!"\n` +
+          `• 🐦 **@PasionFutbolera:** "La pizarra de ${manager.name} en el esquema ${manager.formation} está dando resultados interesantes."\n` +
+          `• 🐦 **@ElChiringuitoTV:** "Ojo a los movimientos de mercado en ${manager.club}. La directiva respalda el proyecto con un ${manager.boardConfidence}% de confianza."\n` +
+          `• 🐦 **@FabrizioRomano:** "El proyecto de ${manager.name} en ${manager.club} sigue adelante. Foco total en los próximos objetivos."`
+        );
+      return { ok: true, ephemeral: false, embeds: [embed], components: [dtContinueRow(userId, manager)] };
+    }
+    return noPlayer();
+  }
 
   let feed = player.lastSocialFeed;
   if (!feed) {
@@ -1538,7 +1636,24 @@ function socialFeedView(userId) {
 /** 7. Vista de Noticias Dinámicas */
 function newsFeedView(userId) {
   const player = storage.getPlayer(userId);
-  if (!player) return noPlayer();
+  if (!player) {
+    const manager = storage.getManager(userId);
+    if (manager) {
+      const embed = new EmbedBuilder()
+        .setColor(0xc0392b)
+        .setTitle(`📰 Diario Deportivo — Actualidad de ${manager.club}`)
+        .setDescription(
+          `🔴 **PORTADA PRINCIPAL:**\n` +
+          `*"${manager.name} lidera a ${manager.club} en busca de la gloria en ${manager.leagueName}"*\n\n` +
+          `🗞️ **Análisis Táctico de la Jornada:**\n` +
+          `El cuerpo técnico mantiene el planteamiento **${manager.formation}** con estilo **${manager.tacticStyle || 'equilibrado'}**. La directiva reporta un **${manager.boardConfidence}% de respaldo** tras las últimas actuaciones.\n\n` +
+          `💼 **Actualidad de Mercado:**\n` +
+          `Presupuesto disponible para incorporaciones: **$${manager.budget.toLocaleString('en-US')}**.`
+        );
+      return { ok: true, ephemeral: false, embeds: [embed], components: [dtContinueRow(userId, manager)] };
+    }
+    return noPlayer();
+  }
 
   const news = player.lastNewsFeed || generateNewsFeed(player, {
     matchResult: {
@@ -1563,7 +1678,11 @@ function newsFeedView(userId) {
 /** 8. Vista de Cantera y Jóvenes Promesas */
 function academyView(userId) {
   const player = storage.getPlayer(userId);
-  if (!player) return noPlayer();
+  if (!player) {
+    const manager = storage.getManager(userId);
+    if (manager) return dtYouthAcademyView(userId, false);
+    return noPlayer();
+  }
 
   const academy = getClubAcademy(player.club);
   const embed = new EmbedBuilder()
@@ -1645,7 +1764,11 @@ function attributesView(userId) {
 
 function tableView(userId) {
   const player = storage.getPlayer(userId);
-  if (!player) return noPlayer();
+  if (!player) {
+    const manager = storage.getManager(userId);
+    if (manager) return dtTableView(userId);
+    return noPlayer();
+  }
 
   if (player.stage === 'copa_nacional' && player.nationalCup) {
     const embed = new EmbedBuilder()
@@ -1843,7 +1966,33 @@ function trainSkillAction(userId, skillKey) {
 
 function awardsView(userId) {
   const player = storage.getPlayer(userId);
-  if (!player) return noPlayer();
+  if (!player) {
+    const manager = storage.getManager(userId);
+    if (manager) {
+      const embed = new EmbedBuilder()
+        .setColor(0xf1c40f)
+        .setTitle(`🏆 Palmarés & Sala de Trofeos — DT ${manager.name}`)
+        .setDescription(`Trayectoria técnica con **${manager.records.matches} partidos dirigidos** y **${manager.records.wins} victorias**.`);
+
+      if (manager.trophies && manager.trophies.length) {
+        embed.addFields({
+          name: `🏆 Títulos Conseguidos (${manager.trophies.length})`,
+          value: manager.trophies.map(t => `• ${t}`).join('\n').slice(0, 1024)
+        });
+      } else {
+        embed.addFields({ name: '🏆 Títulos Conseguidos', value: 'Aún no has levantado trofeos oficiales como Director Técnico.' });
+      }
+
+      embed.addFields({
+        name: '📊 Balance Histórico',
+        value: `• Récord: **${manager.records.wins}V - ${manager.records.draws}E - ${manager.records.losses}D**\n• Reputación: ⭐ **${manager.reputation}/99**`,
+        inline: true
+      });
+
+      return { ok: true, ephemeral: false, embeds: [embed], components: [dtContinueRow(userId, manager)] };
+    }
+    return noPlayer();
+  }
 
   const embed = new EmbedBuilder()
     .setColor(0xf1c40f)
@@ -2552,6 +2701,10 @@ function dtSimulateEntireSeason(userId) {
   }
   if (manager.retired) {
     return { ok: false, ephemeral: true, content: `Esta carrera de DT con **${manager.name}** ya ha finalizado por retiro.` };
+  }
+
+  if (!manager.trophies) {
+    manager.trophies = manager.records?.trophies || [];
   }
 
   // Si ya estaba en entretemporada, avanzamos a la siguiente
