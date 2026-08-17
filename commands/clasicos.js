@@ -24,10 +24,11 @@ module.exports = {
   async execute(interaction) {
     const userId = interaction.user.id;
     const player = storage.getPlayer(userId);
+    const manager = storage.getManager(userId);
     const clubInput = interaction.options.getString('club');
     const paisInput = interaction.options.getString('pais');
 
-    const targetClub = clubInput || (player ? player.club : null);
+    const targetClub = clubInput || (player ? player.club : (manager ? manager.club : null));
 
     if (targetClub && !paisInput) {
       const rivals = getClubRivalries(targetClub);
