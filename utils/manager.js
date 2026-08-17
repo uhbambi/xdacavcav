@@ -416,7 +416,9 @@ function calculateTeamChemistryAndRating(manager) {
  * Simula un partido completo en Modo DT con eventos interactivos minuto a minuto
  */
 function simulateDTMatch(manager, opponentName, teamTalk = null, inGameTactics = {}) {
-  const opponentClub = findClub(opponentName) || { name: opponentName, media: 68 };
+  const oppNameStr = typeof opponentName === 'object' && opponentName ? opponentName.name : (opponentName || 'Rival');
+  const clubName = manager.club || 'Tu Club';
+  const opponentClub = findClub(oppNameStr) || { name: oppNameStr, media: 68 };
   const teamMetrics = calculateTeamChemistryAndRating(manager);
   const myRating = teamMetrics.effectiveRating;
   const oppRating = opponentClub.media || 68;
@@ -438,7 +440,7 @@ function simulateDTMatch(manager, opponentName, teamTalk = null, inGameTactics =
   let classicData = null;
   try {
     const { getClassicData } = require('./classics.js');
-    classicData = getClassicData(manager.club, opponentName);
+    classicData = getClassicData(clubName, oppNameStr);
   } catch (e) {
     classicData = null;
   }
@@ -459,7 +461,7 @@ function simulateDTMatch(manager, opponentName, teamTalk = null, inGameTactics =
 
   // 6 Ocasiones de gol simuladas minuto a minuto
   const minutes = [12, 28, 41, 57, 73, 88];
-  const xi = manager.startingXI.map(id => manager.squad.find(p => p.id === id)).filter(Boolean);
+  const xi = (manager.startingXI || []).map(id => (manager.squad || []).find(p => p.id === id)).filter(Boolean);
   const strikers = xi.filter(p => p.position === 'DEL');
   const midfielders = xi.filter(p => p.position === 'MED');
   const defenders = xi.filter(p => p.position === 'DEF');
@@ -468,18 +470,18 @@ function simulateDTMatch(manager, opponentName, teamTalk = null, inGameTactics =
   minutes.forEach(min => {
     const isMyChance = Math.random() < (myRating / (myRating + oppRating + 5));
     if (isMyChance) {
-      const scorer = pick(strikers.length ? strikers : xi);
-      const assister = pick(midfielders.length ? midfielders : xi);
+      const scorer = pick(strikers.length ? strikers : (xi.length ? xi : [{ name: 'Delantero' }]));
+      const assister = pick(midfielders.length ? midfielders : (xi.length ? xi : [{ name: 'Volante' }]));
       const isGoal = Math.random() < (myExpectedGoals / 4);
 
       if (isGoal) {
         myGoals++;
-        if (scorer) scorer.goals = (scorer.goals || 0) + 1;
-        if (assister && assister.id !== scorer?.id) assister.assists = (assister.assists || 0) + 1;
+        if (scorer && scorer.id) scorer.goals = (scorer.goals || 0) + 1;
+        if (assister && assister.id && assister.id !== scorer?.id) assister.assists = (assister.assists || 0) + 1;
         events.push({
           minute: min,
           type: 'goal_my',
-          title: `⚽ ¡GOOOOOOL DE ${manager.club.toUpperCase()}!`,
+          title: `⚽ ¡GOOOOOOL DE ${clubName.toUpperCase()}!`,
           desc: `Minuto ${min}': Jugada ensayada de pizarra. ${assister ? `${assister.name} habilita con precisión y ` : ''}**${scorer ? scorer.name : 'Delantero'}** define cruzado al fondo de la red.`,
           scorer: scorer?.name,
           assister: assister?.name
@@ -488,7 +490,7 @@ function simulateDTMatch(manager, opponentName, teamTalk = null, inGameTactics =
         events.push({
           minute: min,
           type: 'chance_my',
-          title: `🧤 ¡Casi llega el gol de ${manager.club}!`,
+          title: `🧤 ¡Casi llega el gol de ${clubName}!`,
           desc: `Minuto ${min}': Gran remate de ${scorer ? scorer.name : 'tu equipo'} que el arquero rival desvía al tiro de esquina.`
         });
       }
@@ -499,8 +501,8 @@ function simulateDTMatch(manager, opponentName, teamTalk = null, inGameTactics =
         events.push({
           minute: min,
           type: 'goal_opp',
-          title: `❌ Gol de ${opponentName}`,
-          desc: `Minuto ${min}': Desatención en el fondo de ${manager.club}. El rival aprovecha el espacio y anota con remate rasante.`
+          title: `❌ Gol de ${oppNameStr}`,
+          desc: `Minuto ${min}': Desatención en el fondo de ${clubName}. El rival aprovecha el espacio y anota con remate rasante.`
         });
       } else {
         const gk = goalkeepers[0] || xi[0];
@@ -1094,6 +1096,207 @@ function simulateEntireDTSeason(manager) {
   };
 }
 
+/**
+ * Alinea automáticamente a los mejores 11 jugadores según la formación actual
+ */
+function autoLineupSquad(manager) {
+  const formationKey = manager.formation || '4-3-3';
+  const formDef = FORMATIONS[formationKey] || FORMATIONS['4-3-3'];
+  const squad = manager.squad || [];
+
+  const gks = squad.filter(p => p.position === 'POR').sort((a, b) => b.overall - a.overall);
+  const defs = squad.filter(p => p.position === 'DEF').sort((a, b) => b.overall - a.overall);
+  const mids = squad.filter(p => p.position === 'MED').sort((a, b) => b.overall - a.overall);
+  const fws = squad.filter(p => p.position === 'DEL').sort((a, b) => b.overall - a.overall);
+
+  // Contar requerimientos de la formación
+  let neededGK = 1;
+  let neededDef = 4;
+  let neededMid = 3;
+  let neededFw = 3;
+
+  if (formationKey === '4-4-2') { neededDef = 4; neededMid = 4; neededFw = 2; }
+  else if (formationKey === '4-2-3-1') { neededDef = 4; neededMid = 5; neededFw = 1; }
+  else if (formationKey === '3-5-2') { neededDef = 3; neededMid = 5; neededFw = 2; }
+  else if (formationKey === '5-3-2') { neededDef = 5; neededMid = 3; neededFw = 2; }
+  else if (formationKey === '3-4-3') { neededDef = 3; neededMid = 4; neededFw = 3; }
+
+  const pickedGK = gks.slice(0, neededGK);
+  const pickedDef = defs.slice(0, neededDef);
+  const pickedMid = mids.slice(0, neededMid);
+  const pickedFw = fws.slice(0, neededFw);
+
+  const starting = [...pickedGK, ...pickedDef, ...pickedMid, ...pickedFw];
+  
+  // Si falta alguno por escasez de posición, rellenar con los mejores restantes
+  if (starting.length < 11) {
+    const remaining = squad.filter(p => !starting.some(s => s.id === p.id)).sort((a, b) => b.overall - a.overall);
+    starting.push(...remaining.slice(0, 11 - starting.length));
+  }
+
+  const startingIds = starting.slice(0, 11).map(p => p.id);
+  const benchIds = squad.filter(p => !startingIds.includes(p.id)).map(p => p.id);
+
+  manager.startingXI = startingIds;
+  manager.bench = benchIds;
+  return { ok: true, startingCount: startingIds.length, benchCount: benchIds.length };
+}
+
+/**
+ * Cambia la formación y/o estilo táctico del DT
+ */
+function changeManagerTactic(manager, formationKey, styleKey) {
+  if (formationKey && FORMATIONS[formationKey]) {
+    manager.formation = formationKey;
+  }
+  if (styleKey && TACTICAL_STYLES[styleKey]) {
+    manager.tacticStyle = styleKey;
+  }
+  autoLineupSquad(manager);
+  return {
+    ok: true,
+    formation: manager.formation,
+    formationName: FORMATIONS[manager.formation]?.name || manager.formation,
+    tacticStyle: manager.tacticStyle,
+    styleName: TACTICAL_STYLES[manager.tacticStyle]?.name || manager.tacticStyle
+  };
+}
+
+/**
+ * Aplica una charla técnica de vestuario
+ */
+function deliverTeamTalk(manager, talkId) {
+  const talk = CHARLAS_VESTUARIO.find(t => t.id === talkId) || CHARLAS_VESTUARIO[0];
+  manager.lastTeamTalk = {
+    id: talk.id,
+    label: talk.label,
+    morale: talk.morale || 0,
+    focus: talk.focus || 0,
+    composure: talk.composure || 0,
+    appliedAt: Date.now()
+  };
+
+  (manager.squad || []).forEach(p => {
+    p.morale = Math.max(10, Math.min(100, (p.morale || 70) + (talk.morale || 0)));
+  });
+
+  return { ok: true, talk };
+}
+
+/**
+ * Genera el mercado de fichajes con jugadores disponibles para contratar
+ */
+function getTransferMarketForManager(manager) {
+  if (manager.transferMarket && manager.transferMarket.length > 0 && (Date.now() - (manager.transferMarketTimestamp || 0)) < 600000) {
+    return manager.transferMarket;
+  }
+
+  const targetMedia = manager.clubMedia || 68;
+  const positions = ['POR', 'DEF', 'MED', 'DEL'];
+  const players = [];
+
+  for (let i = 0; i < 6; i++) {
+    const pos = positions[i % positions.length];
+    const ovr = Math.min(92, Math.max(58, targetMedia + rand(-4, 7)));
+    const pot = Math.min(95, ovr + rand(2, 9));
+    const age = rand(19, 32);
+    const baseValue = Math.round(Math.pow(ovr / 10, 3.4) * 80000 + rand(500000, 3000000));
+    const wage = Math.round(baseValue * 0.08);
+
+    players.push({
+      id: `mkt_${Date.now()}_${i}`,
+      name: randomPlayerName(),
+      position: pos,
+      overall: ovr,
+      potential: pot,
+      age,
+      marketValue: baseValue,
+      wage,
+      stamina: rand(85, 100),
+      morale: rand(75, 95),
+      goals: 0,
+      assists: 0
+    });
+  }
+
+  manager.transferMarket = players;
+  manager.transferMarketTimestamp = Date.now();
+  return players;
+}
+
+/**
+ * Ficha a un jugador del mercado usando el presupuesto del club
+ */
+function signPlayerForManager(manager, playerIndex) {
+  const market = getTransferMarketForManager(manager);
+  const target = market[playerIndex];
+
+  if (!target) {
+    return { ok: false, reason: 'Jugador no encontrado en el mercado de pases.' };
+  }
+
+  if ((manager.budget || 0) < target.marketValue) {
+    return {
+      ok: false,
+      reason: `Presupuesto insuficiente. Cuesta ${target.marketValue.toLocaleString('en-US')} y tienes ${(manager.budget || 0).toLocaleString('en-US')}.`
+    };
+  }
+
+  manager.budget -= target.marketValue;
+  const signedPlayer = {
+    ...target,
+    id: `sq_${Date.now()}_${rand(100, 999)}`,
+    club: manager.club
+  };
+
+  manager.squad.push(signedPlayer);
+  manager.bench.push(signedPlayer.id);
+  market.splice(playerIndex, 1);
+  manager.transferMarket = market;
+
+  // Aumentar confianza directiva por refuerzo de jerarquía
+  if (signedPlayer.overall >= (manager.clubMedia || 68)) {
+    manager.boardConfidence = Math.min(100, manager.boardConfidence + 4);
+    manager.fanConfidence = Math.min(100, manager.fanConfidence + 5);
+  }
+
+  return { ok: true, player: signedPlayer, remainingBudget: manager.budget };
+}
+
+/**
+ * Promueve a un juvenil prometedor de la cantera al primer equipo
+ */
+function promoteYouthForManager(manager) {
+  const positions = ['POR', 'DEF', 'MED', 'DEL'];
+  const pos = pick(positions);
+  const targetMedia = manager.clubMedia || 68;
+  const ovr = Math.min(78, Math.max(58, targetMedia - rand(2, 6)));
+  const pot = Math.min(94, ovr + rand(8, 16));
+  const age = rand(16, 18);
+
+  const prospect = {
+    id: `academy_${Date.now()}_${rand(100, 999)}`,
+    name: `${randomPlayerName()} (Canterano)`,
+    position: pos,
+    overall: ovr,
+    potential: pot,
+    age,
+    marketValue: Math.round(Math.pow(ovr / 10, 3) * 60000 + 400000),
+    wage: 25000,
+    stamina: 100,
+    morale: 95,
+    goals: 0,
+    assists: 0,
+    isYouth: true
+  };
+
+  manager.squad.push(prospect);
+  manager.bench.push(prospect.id);
+  manager.fanConfidence = Math.min(100, manager.fanConfidence + 3);
+
+  return { ok: true, prospect };
+}
+
 module.exports = {
   FORMATIONS,
   TACTICAL_STYLES,
@@ -1111,7 +1314,13 @@ module.exports = {
   acceptManagerJobOffer,
   getManagerRetirementVerdict,
   retireManager,
-  simulateEntireDTSeason
+  simulateEntireDTSeason,
+  autoLineupSquad,
+  changeManagerTactic,
+  deliverTeamTalk,
+  getTransferMarketForManager,
+  signPlayerForManager,
+  promoteYouthForManager
 };
 
 
