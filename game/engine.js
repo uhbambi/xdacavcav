@@ -1151,6 +1151,15 @@ function performTransfer(userId, choice) {
 
   if (choice === 'stay') {
     startSeason();
+    const socialPosts = generateSocialFeed(player, {
+      eventType: 'match',
+      extra: { renewed: true }
+    });
+    player.lastSocialFeed = formatSocialFeedEmbed(socialPosts);
+    player.lastNewsFeed = generateNewsFeed(player, {
+      eventType: 'match',
+      extra: { notes: `El astro renueva su compromiso con ${player.club}` }
+    });
     storage.setPlayer(userId, player);
     return {
       ok: true,
@@ -1165,6 +1174,7 @@ function performTransfer(userId, choice) {
 
   const newClub = findClub(clubName);
   const newLeague = getLeague(newClub.leagueKey);
+  const previousClub = player.club;
   player.club = newClub.name;
   player.clubMedia = newClub.media;
   player.clubTier = newClub.tier;
@@ -1173,15 +1183,28 @@ function performTransfer(userId, choice) {
   player.salary = calculateSalary(player);
   startSeason();
   player.morale = Math.min(100, player.morale + 10);
+
+  // Actualizar redes con HERE WE GO de Fabrizio Romano y portada de prensa
+  const socialPosts = generateSocialFeed(player, {
+    eventType: 'transfer_confirmed',
+    extra: { transferTo: newClub.name, previousClub, fee: player.marketValue || 8000000 }
+  });
+  player.lastSocialFeed = formatSocialFeedEmbed(socialPosts);
+  player.lastNewsFeed = generateNewsFeed(player, {
+    eventType: 'transfer',
+    extra: { newClub: newClub.name, previousClub, fee: player.marketValue || 8000000 }
+  });
+
   storage.setPlayer(userId, player);
 
   const embed = new EmbedBuilder()
     .setColor(0x2ecc71)
-    .setTitle('✍️ ¡Fichaje confirmado!')
+    .setTitle('✍️ ¡HERE WE GO! Fichaje confirmado')
     .setDescription(
       `**${player.name}** ficha por ${flagFor(newLeague.country)} **${newClub.name}** (media ${newClub.media}) ` +
       `para jugar ${newLeague.name} en la temporada ${player.season}.\n\n` +
-      `💰 **Nuevo Sueldo Anual:** $${player.salary.toLocaleString('en-US')}/año`
+      `💰 **Nuevo Sueldo Anual:** $${player.salary.toLocaleString('en-US')}/año\n` +
+      `🚨 *Revisa /redes y /noticias para ver el revuelo mediático mundial.*`
     );
 
   return { ok: true, ephemeral: false, embeds: [embed], components: [continueRow(userId)] };
@@ -1199,6 +1222,17 @@ function offersView(userId) {
       return { ok: true, ephemeral: false, embeds: [careerEventEmbed(player, event)], components: [careerEventRow(userId, event)] };
     }
   }
+
+  // Generar rumores de Fabrizio Romano durante el periodo de ofertas
+  if (player.offers && player.offers.length > 0) {
+    const rumorPosts = generateSocialFeed(player, {
+      eventType: 'transfer_rumor',
+      extra: { rumorClub: player.offers[0] }
+    });
+    player.lastSocialFeed = formatSocialFeedEmbed(rumorPosts);
+    storage.setPlayer(userId, player);
+  }
+
   return { ok: true, ephemeral: false, embeds: [offersEmbed(player)], components: offersRows(userId, player.offers || []) };
 }
 
