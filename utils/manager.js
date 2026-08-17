@@ -329,6 +329,7 @@ function newManager({ name, clubName, userId, startingAge = 42, tacticStyle = 'o
       goalsFor: 0,
       goalsAgainst: 0
     },
+    trophies: [],
     matchdayIndex: 0,
     matchdayTotal: 18,
     table: [],
@@ -656,6 +657,32 @@ function ensureDTFixture(manager) {
  * Avanza la jornada de liga en el Modo DT y simula el resto de los partidos
  */
 function advanceDTLeague(manager, matchResult) {
+  if (!matchResult) {
+    // Preparar siguiente temporada
+    manager.season = (manager.season || 1) + 1;
+    manager.seasonStats = {
+      matches: 0,
+      wins: 0,
+      draws: 0,
+      losses: 0,
+      points: 0,
+      goalsFor: 0,
+      goalsAgainst: 0
+    };
+    manager.fixture = [];
+    manager.table = [];
+    manager.matchdayIndex = 0;
+    ensureDTFixture(manager);
+    return {
+      matchdayIndex: 0,
+      matchdayTotal: manager.matchdayTotal || 16,
+      season: manager.season,
+      position: 1,
+      totalClubs: manager.table.length,
+      seasonEnded: false
+    };
+  }
+
   ensureDTFixture(manager);
 
   // 1. Actualizar el partido del DT y de su rival en la tabla
@@ -745,29 +772,16 @@ function advanceDTLeague(manager, matchResult) {
     if (currentPos === 1) {
       seasonTrophy = `🏆 Campeón ${manager.leagueName} (Temporada ${manager.season})`;
       if (!manager.records.trophies) manager.records.trophies = [];
-      manager.records.trophies.push(seasonTrophy);
-      manager.reputation = Math.min(99, manager.reputation + 5);
-      manager.boardConfidence = Math.min(100, manager.boardConfidence + 15);
-      manager.budget += rand(10000000, 25000000);
+      if (!manager.records.trophies.includes(seasonTrophy)) {
+        manager.records.trophies.push(seasonTrophy);
+        manager.reputation = Math.min(99, manager.reputation + 5);
+        manager.boardConfidence = Math.min(100, manager.boardConfidence + 15);
+        manager.budget += rand(10000000, 25000000);
+      }
     }
 
     // Generar atractivas ofertas de clubes para el DT
     manager.jobOffers = generateManagerOffers(manager);
-
-    // Preparar siguiente temporada
-    manager.season++;
-    manager.seasonStats = {
-      matches: 0,
-      wins: 0,
-      draws: 0,
-      losses: 0,
-      points: 0,
-      goalsFor: 0,
-      goalsAgainst: 0
-    };
-    manager.fixture = [];
-    manager.table = [];
-    manager.matchdayIndex = 0;
   }
 
   return {
