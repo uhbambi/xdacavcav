@@ -43,6 +43,45 @@ module.exports = {
     )
     .addSubcommand(sub =>
       sub
+        .setName('plantilla')
+        .setDescription('Ver todos los jugadores de tu plantel, titulares y suplentes')
+    )
+    .addSubcommand(sub =>
+      sub
+        .setName('alinear')
+        .setDescription('El cuerpo técnico optimiza automáticamente el mejor 11 titular')
+    )
+    .addSubcommand(sub =>
+      sub
+        .setName('tactica')
+        .setDescription('Cambiar tu formación y estilo táctico de juego')
+        .addStringOption(opt => opt.setName('formacion').setDescription('Ej: 4-3-3, 4-4-2, 3-5-2, 5-3-2').setRequired(false))
+        .addStringOption(opt => opt.setName('estilo').setDescription('Ej: ofensivo, tiki-taka, contraataque, autobus, equilibrado').setRequired(false))
+    )
+    .addSubcommand(sub =>
+      sub
+        .setName('charla')
+        .setDescription('Dar una charla motivacional o de vestuario al plantel')
+        .addStringOption(opt => opt.setName('tipo').setDescription('motivacion, furia, concentracion, calma, gloria').setRequired(false))
+    )
+    .addSubcommand(sub =>
+      sub
+        .setName('fichar')
+        .setDescription('Explorar el mercado de fichajes o contratar un jugador')
+        .addIntegerOption(opt => opt.setName('numero').setDescription('Número del jugador a fichar').setRequired(false))
+    )
+    .addSubcommand(sub =>
+      sub
+        .setName('cantera')
+        .setDescription('Promover a una joven joya de las divisiones inferiores al primer equipo')
+    )
+    .addSubcommand(sub =>
+      sub
+        .setName('copas')
+        .setDescription('Ver el estado de tu club en Copa Libertadores, Champions o Copa Nacional')
+    )
+    .addSubcommand(sub =>
+      sub
         .setName('ofertas')
         .setDescription('Ver qué clubes quieren ficharte como su nuevo Director Técnico')
     )
@@ -99,7 +138,7 @@ module.exports = {
           `📊 **Datos Iniciales:**\n` +
           `• Reputación: **${manager.reputation}/99** · Formación: **${manager.formation}**\n` +
           `• Plantel: **${manager.squad.length} jugadores**\n` +
-          `• Presupuesto de fichajes: **$${manager.budget.toLocaleString('en-US')}**\n` +
+          `• Presupuesto de fichajes: **${manager.budget.toLocaleString('en-US')}**\n` +
           `• Confianza de la Directiva: **${manager.boardConfidence}%**\n\n` +
           `🎯 **Objetivos de la temporada:**\n` +
           manager.seasonObjectives.map(o => `• ${o.title} (${o.target})`).join('\n')
@@ -131,6 +170,80 @@ module.exports = {
 
     if (sub === 'panel') {
       const res = engine.dtPanelView(userId);
+      return interaction.reply({
+        content: res.content,
+        embeds: res.embeds,
+        components: res.components,
+        ephemeral: res.ephemeral
+      });
+    }
+
+    if (sub === 'plantilla') {
+      const res = engine.dtSquadView(userId);
+      return interaction.reply({
+        content: res.content,
+        embeds: res.embeds,
+        components: res.components,
+        ephemeral: res.ephemeral
+      });
+    }
+
+    if (sub === 'alinear') {
+      const res = engine.dtAutoLineupAction(userId);
+      return interaction.reply({
+        content: res.content,
+        embeds: res.embeds,
+        components: res.components,
+        ephemeral: res.ephemeral
+      });
+    }
+
+    if (sub === 'tactica') {
+      const formation = interaction.options.getString('formacion');
+      const style = interaction.options.getString('estilo');
+      const res = engine.dtTacticView(userId, formation, style);
+      return interaction.reply({
+        content: res.content,
+        embeds: res.embeds,
+        components: res.components,
+        ephemeral: res.ephemeral
+      });
+    }
+
+    if (sub === 'charla') {
+      const tipo = interaction.options.getString('tipo');
+      const res = engine.dtTeamTalkView(userId, tipo);
+      return interaction.reply({
+        content: res.content,
+        embeds: res.embeds,
+        components: res.components,
+        ephemeral: res.ephemeral
+      });
+    }
+
+    if (sub === 'fichar') {
+      const num = interaction.options.getInteger('numero');
+      const res = engine.dtTransfersView(userId, num ? num - 1 : null);
+      return interaction.reply({
+        content: res.content,
+        embeds: res.embeds,
+        components: res.components,
+        ephemeral: res.ephemeral
+      });
+    }
+
+    if (sub === 'cantera') {
+      const res = engine.dtYouthAcademyView(userId, true);
+      return interaction.reply({
+        content: res.content,
+        embeds: res.embeds,
+        components: res.components,
+        ephemeral: res.ephemeral
+      });
+    }
+
+    if (sub === 'copas') {
+      const res = engine.dtCupsView(userId);
       return interaction.reply({
         content: res.content,
         embeds: res.embeds,
