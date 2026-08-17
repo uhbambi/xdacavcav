@@ -249,7 +249,18 @@ function saveAllManagers(data) {
 
 function getManager(userId) {
   const all = loadAllManagers();
-  return all[userId] || null;
+  const manager = all[userId] || null;
+
+  // Auto-reparación de guardados viejos: asegura que todo jugador del plantel tenga energía
+  if (manager && Array.isArray(manager.squad)) {
+    for (const p of manager.squad) {
+      if (typeof p.energy !== 'number') {
+        p.energy = typeof p.stamina === 'number' ? p.stamina : 100;
+      }
+    }
+  }
+
+  return manager;
 }
 
 function setManager(userId, managerData) {

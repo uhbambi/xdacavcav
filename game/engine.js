@@ -42,8 +42,15 @@ const { generateNewsFeed, generateNewsHeadline, formatNewsFeedEmbed } = require(
 const { getClubAcademy, promoteProspect, generateYouthAcademy } = require('../utils/academy.js');
 const { inductIntoHallOfFame, formatHallOfFameEmbed } = require('../utils/hallOfFame.js');
 const { getTopOverall, getTopMarketValue, getTopWonderkids, getTopByCountry } = require('../utils/worldRankings.js');
-const { getWorldState, simulateGlobalWorldWindow } = require('../utils/persistentWorld.js');
 const { normalizePersonality } = require('../utils/personality.js');
+const { normalizeDNA, describeDNA, dnaProfile, dnaLabel, clutchRatingBonus, penaltyBoost } = require('../utils/dna.js');
+const { normalizeFanRelation, recordFanMatch, maybeFanMoment, describeFanStatus, fanBar, fanTier } = require('../utils/fans.js');
+const { getStadium, stadiumLine, describeStadium, attendanceFor, revenueFor } = require('../utils/stadium.js');
+const { generatePersonalObjectives, objectivesProgress, evaluateAndApplyPersonalObjectives } = require('../utils/personalObjectives.js');
+const { advanceNpcWorld, getNpcWonderkids, getLastWindow, getNpcFreeAgents, getNpcTop } = require('../utils/npcWorld.js');
+const { computeWorldRecords, formatWorldRecords } = require('../utils/records.js');
+const { getGoatRanking, formatGoatRanking } = require('../utils/goat.js');
+const { maybeDramaFlash } = require('../utils/drama.js');
 
 function flagFor(country) {
   return FLAGS[country] || '';
@@ -207,6 +214,27 @@ function matchEmbed(title, color, teamName, result, extraDesc) {
     );
 }
 
+/**
+ * Texto de ambiente del partido: estadio + asistencia + hinchada + drama.
+ * Solo para partidos de club (las selecciones juegan en estadios neutrales).
+ */
+function matchAtmosphereText(player, context = {}) {
+  const parts = [];
+  if (!context.isNational) {
+    parts.push(stadiumLine(player.club, context));
+  }
+  const fanMoment = maybeFanMoment(player, {
+    result: context.result,
+    goals: context.goals || 0,
+    isClassic: context.isClassic,
+    isFinal: context.isFinal
+  });
+  if (fanMoment) parts.push(fanMoment);
+  const drama = maybeDramaFlash(player, { result: context.result });
+  if (drama) parts.push(drama);
+  return parts.join('\n');
+}
+
 function tacticEmbed(player, opponentName, headerTitle) {
   const oppClub = findClub(opponentName);
   const oppLeague = oppClub ? getLeague(oppClub.leagueKey) : null;
@@ -327,6 +355,14 @@ function applyMatchToPlayer(player, result, { national = false } = {}) {
     motm: result.motm,
     cleanSheet: result.cleanSheet,
     isClassic: Boolean(result.isClassic)
+  });
+
+  // 2b. Relación con la hinchada
+  recordFanMatch(player, result.result, {
+    goals: result.playerGoals,
+    isClassic: Boolean(result.isClassic),
+    isFinal: Boolean(result.isFinal),
+    motm: result.motm
   });
 
   // 3. Sistema de Redes Sociales y Noticias Dinámicas
@@ -674,6 +710,12 @@ function playLeagueMatch(userId, player, tacticKey, bonus) {
     };
   }
 
+  // Bonus de ADN (clutch en clásicos y partidos importantes)
+  const clutchBonus = clutchRatingBonus(player, { isClassic: Boolean(classicData), isBigMatch: false });
+  if (clutchBonus) {
+    bonus = { ...bonus, ratingBonus: (bonus.ratingBonus || 0) + clutchBonus };
+  }
+
   const result = simulateMatch(player, club, opponentClub, tacticKey, bonus);
   if (bonus.bonusAssists) {
     result.playerAssists += bonus.bonusAssists;
@@ -696,13 +738,23 @@ function playLeagueMatch(userId, player, tacticKey, bonus) {
   const streakInfo = getStreakStatus(player);
   const classicTag = classicData ? `🔥 ¡${classicData.name}! ` : '';
   const streakTag = streakInfo && streakInfo.emoji !== '➖' ? ` ${streakInfo.emoji}` : '';
+  const atmosphere = matchAtmosphereText(player, {
+    result: result.result,
+    goals: result.playerGoals,
+    isClassic: Boolean(classicData),
+    isNational: false,
+    opponentMedia: opponentClub ? opponentClub.media : 60
+  });
 
   const embed = matchEmbed(
     `${classicTag}${flagFor(league.country)} ${league.name} · Fecha ${player.matchdayIndex}/${player.fixture.length}${streakTag}`,
     result.result === 'V' ? 0x2ecc71 : result.result === 'E' ? 0xf1c40f : 0xe74c3c,
     player.club,
     result,
-    classicData ? `⚔️ **Clásico Histórico**: ${result.result === 'V' ? '¡Victoria épica que alegra a toda la hinchada! (+30% sueldo y +5 moral)' : result.result === 'D' ? 'Dolorosa derrota en el clásico (-5 moral).' : 'Empate con cuchillo entre los dientes.'}` : null
+    [
+      classicData ? `⚔️ **Clásico Histórico**: ${result.result === 'V' ? '¡Victoria épica que alegra a toda la hinchada! (+30% sueldo y +5 moral)' : result.result === 'D' ? 'Dolorosa derrota en el clásico (-5 moral).' : 'Empate con cuchillo entre los dientes.'}` : null,
+      atmosphere
+    ].filter(Boolean).join('\n\n')
   );
 
   const momento = maybePickMomento();
@@ -729,6 +781,13 @@ function playTournamentMatch(userId, player, tacticKey, bonus) {
     ? { name: tournament.myTeam, media: (findNation(player.nationality) || { media: 72 }).media, tier: 5 }
     : findClub(player.club);
 
+  // Bonus de ADN (clutch en copas, finales y partidos grandes)
+  const tournamentBig = isBigMatch(tournament) || isFinal(tournament);
+  const clutchBonus = clutchRatingBonus(player, { isBigMatch: tournamentBig, isClassic: false });
+  if (clutchBonus) {
+    bonus = { ...bonus, ratingBonus: (bonus.ratingBonus || 0) + clutchBonus };
+  }
+
   const result = simulateMatch(player, myTeam, opponent, tacticKey, bonus);
   if (bonus.bonusAssists) {
     result.playerAssists += bonus.bonusAssists;
@@ -740,6 +799,13 @@ function playTournamentMatch(userId, player, tacticKey, bonus) {
   applyMatchToPlayer(player, result, { national: isNational });
 
   const label = phaseLabel(tournament);
+  const atmosphere = matchAtmosphereText(player, {
+    result: result.result,
+    goals: result.playerGoals,
+    isClassic: false,
+    isFinal: isFinal(tournament),
+    isNational
+  });
 
   // Si hay empate en fase de eliminación directa (mata-mata), se juega la tanda de penales interactiva
   if (result.myGoals === result.oppGoals && KNOCKOUT_ORDER.includes(tournament.phase)) {
@@ -763,7 +829,7 @@ function playTournamentMatch(userId, player, tacticKey, bonus) {
       0xf1c40f,
       tournament.myTeam,
       result,
-      '⏱️ ¡Empate tras los 90 minutos! El partido se define por PENALES.'
+      ['⏱️ ¡Empate tras los 90 minutos! El partido se define por PENALES.', atmosphere].filter(Boolean).join('\n\n')
     );
     return {
       ok: true,
@@ -781,7 +847,7 @@ function playTournamentMatch(userId, player, tacticKey, bonus) {
     outcome.status === 'eliminado' ? 0xe74c3c : outcome.status === 'campeon' ? 0xf1c40f : 0x9b59b6,
     tournament.myTeam,
     result,
-    outcome.text
+    [outcome.text, atmosphere].filter(Boolean).join('\n\n')
   );
 
   storage.setPlayer(userId, player);
@@ -883,6 +949,7 @@ function resolveLeagueEnd(userId, player) {
 
   player.qualifiedContinentalCup = qual;
   if (qual) {
+    player.qualifiedThisSeason = true;
     lines.push(`✨ **Clasificación internacional:** ${player.club} obtuvo cupo a la **${qual.name}**.`);
   }
 
@@ -994,6 +1061,13 @@ function finishSeasonFlow(userId, player, leadingDesc) {
     }
   }
 
+  // Objetivos personales de temporada (goles, asistencias, rating, clasificación)
+  const objectivesResult = evaluateAndApplyPersonalObjectives(player, {
+    position,
+    qualifiedContinentalCup: Boolean(player.qualifiedThisSeason)
+  });
+  if (objectivesResult.text) leadingDesc += `\n\n${objectivesResult.text}`;
+
   const { development, awards } = finishSeason(player);
 
   // 4. Registrar temporada en Timeline Histórico
@@ -1002,8 +1076,8 @@ function finishSeasonFlow(userId, player, leadingDesc) {
     awardsWon: awards || []
   });
 
-  // 16. Mover el mercado del universo persistente
-  simulateGlobalWorldWindow();
+  // 16. Avanzar el universo NPC (mercado, generaciones, retiros) y récords
+  advanceNpcWorld();
 
   const growthText = development.growth >= 0
     ? `📈 Media: **${player.overall}** (${development.growth >= 0 ? '+' : ''}${development.growth}) · Edad: ${player.age} · Potencial: **${player.potential}**`
@@ -1025,11 +1099,13 @@ function finishSeasonFlow(userId, player, leadingDesc) {
       `\n\n${econSummary}`
     );
 
-  // Generar nuevo objetivo para la siguiente temporada
+  // Generar nuevos objetivos para la siguiente temporada
   const currentLeague = getLeague(player.leagueKey);
   if (currentLeague) {
     player.currentObjective = generateSeasonObjective(player, currentLeague);
+    player.personalObjectives = generatePersonalObjectives(player, currentLeague);
   }
+  player.qualifiedThisSeason = false;
 
   // Retiro a los 42 años o voluntario
   if (player.retired || player.age >= 42) {
@@ -1154,7 +1230,9 @@ function performTransfer(userId, choice) {
     player.cup = null;
     player.worldCup = null;
     player.qualifiedContinentalCup = null;
+    player.qualifiedThisSeason = false;
     player.suspendedMatches = 0;
+    player.personalObjectives = generatePersonalObjectives(player);
   };
 
   if (choice === 'stay') {
@@ -1275,6 +1353,8 @@ function profileView(userId) {
   const personalityEmoji = player.personality?.emoji || '⚽';
   const personalityName = player.personality?.name || 'Profesional Equilibrado';
   const injuryStatus = formatInjuryStatus(player);
+  const fanStatus = describeFanStatus(player);
+  const dnaProf = dnaProfile(player.footballDNA);
 
   const embed = new EmbedBuilder()
     .setColor(0x3498db)
@@ -1282,6 +1362,7 @@ function profileView(userId) {
     .setDescription(
       (player.retired ? 'Jugador retirado.' : `Temporada ${player.season} · ${stageLabel}${player.injuredMatches > 0 ? ` · 🚑 ${player.injuredMatches} partidos de baja` : ''}${player.suspendedMatches > 0 ? ` · 🟥 ${player.suspendedMatches} partido(s) suspendido` : ''}`) +
       `\n🎭 **Personalidad:** ${personalityEmoji} **${personalityName}**\n` +
+      `❤️ **Hinchada:** ${fanStatus.emoji} **${fanStatus.tier}** — ${fanStatus.score}/100\n` +
       `📈 **Estatus:** Reputación: **${repSummary.reputation}** | Popularidad: **${repSummary.popularity}** | Prestigio: **${repSummary.prestige}** (${repSummary.tierLabel})`
     )
     .addFields(
@@ -1319,6 +1400,11 @@ function profileView(userId) {
       {
         name: '⚡ Atributos',
         value: describeAttributes(player.attributes),
+        inline: false
+      },
+      {
+        name: '🧬 ADN Futbolístico',
+        value: `Fuerte en **${dnaLabel(dnaProf.best.key)}** (${dnaProf.best.val}) · Débil en **${dnaLabel(dnaProf.worst.key)}** (${dnaProf.worst.val}) · Promedio ${dnaProf.average}/99`,
         inline: false
       }
     );
@@ -1518,19 +1604,19 @@ function reputationView(userId) {
   }
 
   const rep = getReputationSummary(player);
-  const pers = player.personality || { name: 'Profesional Equilibrado', emoji: '⚽', desc: 'Dedicado y constante' };
+  const pers = player.personality || { name: 'Profesional Equilibrado', emoji: '⚽', description: 'Dedicado y constante' };
 
   const embed = new EmbedBuilder()
     .setColor(0xe67e22)
     .setTitle(`📈 Reputación, Fama & Prensa — ${player.name}`)
     .setDescription(
       `🎭 **Rasgo de Personalidad:** ${pers.emoji} **${pers.name}**\n` +
-      `*${pers.desc}*\n\n` +
+      `*${pers.description}*\n\n` +
       `📊 **Métricas Mediáticas:**\n` +
       `• **Reputación:** ⭐ **${rep.reputation}/99** (Nivel de respeto deportivo global)\n` +
       `• **Popularidad:** 🔥 **${rep.popularity}/99** (Seguidores, marcas y valor comercial)\n` +
       `• **Prestigio:** 👑 **${rep.prestige}/99** (Peso histórico en grandes torneos)\n` +
-      `• **Estatus Mediático:** **${rep.tierLabel}**\n\n` +
+      `• **Estatus Mediático:** **${rep.tierLabel}** — *${rep.tierDesc}*\n\n` +
       `🎙️ **Veredicto de la Prensa:**\n` +
       `*"${rep.pressQuote}"*`
     );
@@ -1738,6 +1824,248 @@ function hallOfFameView(userId) {
     .setColor(0xf1c40f)
     .setTitle('🏛️ Salón de la Fama Permanente — Leyendas Inmortales')
     .setDescription(text);
+
+  return { ok: true, ephemeral: false, embeds: [embed] };
+}
+
+/** 🏟️ Estadio del club (jugador o DT) */
+function stadiumView(userId) {
+  const player = storage.getPlayer(userId);
+  let clubName = null;
+  if (player) clubName = player.club;
+  else {
+    const manager = storage.getManager(userId);
+    if (manager) clubName = manager.club;
+    else return noPlayer();
+  }
+
+  const club = findClub(clubName);
+  const stadium = getStadium(clubName);
+  const desc = describeStadium(stadium);
+  const revenueBase = revenueFor(stadium, stadium.avgAttendance);
+  const classicRevenue = revenueFor(stadium, attendanceFor(stadium, { isClassic: true }));
+
+  const embed = new EmbedBuilder()
+    .setColor(0x8e44ad)
+    .setTitle(`🏟️ ${stadium.name}`)
+    .setDescription(
+      `Casa de **${clubName}**${club ? ` (${flagFor(club.country)} ${club.country})` : ''}\n\n` +
+      `👥 **Capacidad:** ${desc.capacity.toLocaleString('en-US')} espectadores\n` +
+      `🎟️ **Asistencia promedio:** ${desc.avgAttendance.toLocaleString('en-US')} (${desc.fillRate}% de ocupación)\n` +
+      `🔥 **Ambiente:** ${stadium.atmosphere}/100\n` +
+      `🛠️ **Estado:** ${stadium.condition}/100 · Última remodelación: ${stadium.lastRenovation}\n` +
+      `💰 **Ingresos por partido (promedio):** $${revenueBase.toLocaleString('en-US')}\n` +
+      `⚔️ **Ingresos en un clásico:** $${classicRevenue.toLocaleString('en-US')}`
+    );
+
+  if (stadium.upgrades.length) {
+    embed.addFields({
+      name: '🔧 Historial de Mejoras y Remodelaciones',
+      value: stadium.upgrades.map(u => `• **${u.year}** — ${u.type}: ${u.note}`).join('\n')
+    });
+  }
+
+  embed.setFooter({ text: 'Los clásicos llenan el estadio y multiplican la recaudación.' });
+
+  const components = (player && !player.retired && player.stage !== 'entretemporada') ? [continueRow(userId)] : [];
+  return { ok: true, ephemeral: false, embeds: [embed], components };
+}
+
+/** 👥 Relación con la hinchada */
+function fansView(userId) {
+  const player = storage.getPlayer(userId);
+  if (!player) {
+    const manager = storage.getManager(userId);
+    if (manager) {
+      const fan = manager.fanConfidence ?? 75;
+      const embed = new EmbedBuilder()
+        .setColor(0xe74c3c)
+        .setTitle(`📣 Hinchada de ${manager.club}`)
+        .setDescription(
+          `👔 **DT ${manager.name}** cuenta con un **${fan}%** de apoyo popular.\n\n` +
+          `Las victorias, los clásicos y los títulos suben la confianza de la hinchada; las malas rachas la erosionan.`
+        );
+      return { ok: true, ephemeral: false, embeds: [embed], components: [dtContinueRow(userId, manager)] };
+    }
+    return noPlayer();
+  }
+
+  const fan = describeFanStatus(player);
+  const tier = fanTier(fan.score);
+
+  const embed = new EmbedBuilder()
+    .setColor(0xe74c3c)
+    .setTitle(`❤️ Relación con la Hinchada — ${player.name}`)
+    .setDescription(
+      `**${tier.emoji} ${tier.title}** — ${fan.score}/100\n` +
+      `\`${fan.bar}\`\n\n` +
+      `🏟️ **Club:** ${player.club}\n` +
+      `⚽ Goles que suben tu vínculo con la gente. Las derrotas y las malas declaraciones lo erosionan.` +
+      (player.fanRelation >= 92 ? `\n\n👑 **Sos ídolo eterno:** la tribuna te va a recordar para siempre.` : player.fanRelation >= 65 ? `\n\n❤️ **La gente te quiere:** seguí dando alegrías para llegar a ídolo.` : player.fanRelation < 35 ? `\n\n🚨 **La hinchada está caliente:** necesitás un partidazo para recomponer la relación.` : '')
+    );
+
+  return { ok: true, ephemeral: false, embeds: [embed], components: (!player.retired && player.stage !== 'entretemporada') ? [continueRow(userId)] : [] };
+}
+
+/** 🧬 ADN futbolístico */
+function dnaView(userId) {
+  const player = storage.getPlayer(userId);
+  if (!player) return noPlayer();
+  normalizeDNA(player);
+
+  const prof = dnaProfile(player.footballDNA);
+
+  const traitDesc = {
+    mentalidad: 'Capacidad de reponerse a los golpes y mantener la ambición.',
+    clutch: 'Aparece en los momentos importantes: clásicos, finales y definiciones.',
+    regularidad: 'Constancia de rendimiento partido a partido.',
+    presion: 'Manejo de la presión en definiciones por penales y partidos calientes.',
+    liderazgo: 'Influencia sobre sus compañeros y el vestuario.',
+    adaptabilidad: 'Facilidad para rendir en otros países, ligas y esquemas.',
+    disciplina: 'Cuidado personal, cumplimiento táctico y conducta.'
+  };
+
+  const embed = new EmbedBuilder()
+    .setColor(0x9b59b6)
+    .setTitle(`🧬 ADN Futbolístico — ${player.name}`)
+    .setDescription(
+      `Dos jugadores con ${player.overall} OVR pueden jugar completamente distinto. Estas son tus características ocultas:\n\n` +
+      `${describeDNA(player.footballDNA)}`
+    )
+    .addFields(
+      { name: `💪 Tu mayor fortaleza`, value: `**${dnaLabel(prof.best.key)}** (${prof.best.val}) — ${traitDesc[prof.best.key]}`, inline: false },
+      { name: `⚠️ Tu punto débil`, value: `**${dnaLabel(prof.worst.key)}** (${prof.worst.val}) — ${traitDesc[prof.worst.key]}`, inline: false }
+    )
+    .setFooter({ text: 'El clutch y la presión influyen en clásicos, finales y penales.' });
+
+  return { ok: true, ephemeral: false, embeds: [embed], components: (!player.retired && player.stage !== 'entretemporada') ? [continueRow(userId)] : [] };
+}
+
+/** 🎯 Objetivos personales de temporada */
+function objectivesView(userId) {
+  const player = storage.getPlayer(userId);
+  if (!player) return noPlayer();
+  const objs = player.personalObjectives || [];
+  const progress = objectivesProgress(player);
+
+  const lines = objs.map(o => {
+    let current = '—';
+    if (o.type === 'goles') current = `${progress.goals}/${o.target}`;
+    else if (o.type === 'asistencias') current = `${progress.asistencias}/${o.target}`;
+    else if (o.type === 'rating') current = `${progress.rating}/${o.target}`;
+    else if (o.type === 'vallas') current = `${progress.vallas}/${o.target}`;
+    const ok = (() => {
+      switch (o.type) {
+        case 'goles': return progress.goals >= o.target;
+        case 'asistencias': return progress.asistencias >= o.target;
+        case 'rating': return progress.rating >= o.target && player.seasonStats.apps >= 5;
+        case 'vallas': return progress.vallas >= o.target;
+        default: return false;
+      }
+    })();
+    return `${ok ? '✅' : '🔄'} **${o.label}** — \`${current}\``;
+  });
+
+  const embed = new EmbedBuilder()
+    .setColor(0x2ecc71)
+    .setTitle(`🎯 Objetivos Personales · Temporada ${player.season}`)
+    .setDescription(
+      (lines.length ? lines.join('\n') : 'Sin objetivos personales asignados.') +
+      `\n\n📊 **Progreso:** ${player.seasonStats.apps} PJ · ${player.seasonStats.goals} ⚽ · ${player.seasonStats.assists} 🅰️ · Rating ${progress.rating}` +
+      `\n\nCumplirlos te da **moral, reputación y bonus salarial**; fallarlos te los resta.`
+    );
+
+  return { ok: true, ephemeral: false, embeds: [embed], components: (!player.retired && player.stage !== 'entretemporada') ? [continueRow(userId)] : [] };
+}
+
+/** 🌎 Récords históricos mundiales */
+function recordsView(userId) {
+  const text = formatWorldRecords();
+  const embed = new EmbedBuilder()
+    .setColor(0xf1c40f)
+    .setTitle('🌎 Récords Históricos Mundiales')
+    .setDescription(
+      `Todos los jugadores del servidor y del universo compiten por batir estos registros.\n\n${text}`
+    )
+    .setFooter({ text: 'Batí un récord y tu nombre quedará inmortalizado acá.' });
+
+  return { ok: true, ephemeral: false, embeds: [embed] };
+}
+
+/** 🐐 Ranking GOAT histórico */
+function goatView(userId) {
+  const text = formatGoatRanking(12);
+  const embed = new EmbedBuilder()
+    .setColor(0xf39c12)
+    .setTitle('🐐 Ranking GOAT — Índice Histórico')
+    .setDescription(
+      `La puntuación pondera títulos, goles, asistencias, premios, selección, copas continentales, longevidad y rendimiento.\n\n${text}`
+    );
+
+  return { ok: true, ephemeral: false, embeds: [embed] };
+}
+
+/** 🗞️ Mercado de fichajes global (NPC) */
+function marketView(userId) {
+  const window = getLastWindow();
+  const freeAgents = getNpcFreeAgents(6);
+  const topNpc = getNpcTop(5);
+
+  const transfersText = (window.transfers || []).length
+    ? window.transfers.slice(0, 8).map(t =>
+        `🔁 **${t.player}** (${t.position}, ${t.overall} OVR)\n   ${t.from} → **${t.to}** · 💰 $${(t.fee || 0).toLocaleString('en-US')}`
+      ).join('\n')
+    : 'Sin movimientos esta ventana.';
+
+  const rumorsText = (window.rumors || []).length
+    ? window.rumors.slice(0, 4).map(r => `• ${r}`).join('\n')
+    : 'Sin rumores por ahora.';
+
+  const freeText = freeAgents.length
+    ? freeAgents.map(p => `• **${p.name}** (${p.position}, ${p.overall} OVR, ${p.age} años) — libre`).join('\n')
+    : 'No hay agentes libres destacados.';
+
+  const topText = topNpc.map((p, i) =>
+    `${i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`} **${p.name}** (${p.position}) — ${p.overall} OVR · ${p.club || 'Libre'}`
+  ).join('\n');
+
+  const embed = new EmbedBuilder()
+    .setColor(0x3498db)
+    .setTitle('🗞️ Mercado de Fichajes Global')
+    .setDescription(
+      `📦 **Últimos traspasos del mundo:**\n${transfersText}\n\n` +
+      `💬 **Rumores:**\n${rumorsText}\n\n` +
+      `🆓 **Agentes libres:**\n${freeText}\n\n` +
+      `⭐ **Top NPC del mundo:**\n${topText}`
+    );
+
+  return { ok: true, ephemeral: false, embeds: [embed] };
+}
+
+/** 👶 Promesas NPC del mundo (wonderkids) */
+function wonderkidsView(userId) {
+  const window = getLastWindow();
+  const kids = getNpcWonderkids(8);
+
+  const newPromises = (window.newPromises || []).length
+    ? window.newPromises.slice(0, 4).map(p =>
+        `🌟 **NUEVA PROMESA** ${p.name} ${flagFor(p.nationality)}\n   ${p.age} años · ${p.position} · OVR ${p.overall} · POT **${p.potential}** · ${p.club}`
+      ).join('\n\n')
+    : '';
+
+  const kidLines = kids.map((p, i) =>
+    `\`#${i + 1}\` **${p.name}** ${flagFor(p.nationality)} (${p.position}, ${p.age} años)\n` +
+    `└ OVR **${p.overall}** · POT **${p.potential}** · ${p.club || 'Libre'} · Valor: ${formatMoney(p.value || 1000000)}`
+  ).join('\n\n');
+
+  const embed = new EmbedBuilder()
+    .setColor(0x16a085)
+    .setTitle('👶 Generación de Promesas & Wonderkids')
+    .setDescription(
+      `${newPromises ? newPromises + '\n\n' : ''}` +
+      `🌱 **Top jóvenes del universo:**\n\n${kidLines || 'Aún no hay promesas registradas.'}`
+    )
+    .setFooter({ text: 'Estos NPC crecen, se transfieren y se retiran temporada a temporada.' });
 
   return { ok: true, ephemeral: false, embeds: [embed] };
 }
@@ -2021,6 +2349,112 @@ function awardsView(userId) {
   return { ok: true, ephemeral: false, embeds: [embed], components };
 }
 
+/** Agrupa trofeos por torneo para el museo: "Primera División × 4 (T2, T5)". */
+function groupTrophies(list) {
+  const map = new Map();
+  for (const t of list) {
+    const m = String(t).match(/^(.*?)\s*\(Temporada (\d+)\)$/);
+    const base = m ? m[1].trim() : String(t);
+    const season = m ? m[2] : null;
+    if (!map.has(base)) map.set(base, { count: 0, seasons: [] });
+    const entry = map.get(base);
+    entry.count += 1;
+    if (season) entry.seasons.push(season);
+  }
+  return [...map.entries()].map(([base, e]) => ({ base, ...e }));
+}
+
+/** Vitrina de Trofeos: títulos colectivos y premios individuales (jugador y DT) */
+function vitrinaView(userId) {
+  const player = storage.getPlayer(userId);
+
+  // ── Modo Director Técnico ──
+  if (!player) {
+    const manager = storage.getManager(userId);
+    if (!manager) return noPlayer();
+
+    const trophies = manager.trophies || [];
+    const totalMatches = manager.records?.matches || 0;
+    const wins = manager.records?.wins || 0;
+
+    let nivel;
+    if (trophies.length >= 8) nivel = '👑 Vitrina de Leyenda de los Banquillos';
+    else if (trophies.length >= 5) nivel = '⭐ Vitrina de Estratega Consagrado';
+    else if (trophies.length >= 3) nivel = '🏆 Vitrina de Técnico Campeón';
+    else if (trophies.length >= 1) nivel = '🥈 Vitrina Inaugurada';
+    else nivel = '📋 Vitrina en Blanco (aún sin trofeos)';
+
+    const embed = new EmbedBuilder()
+      .setColor(0xf1c40f)
+      .setTitle(`🏆 Vitrina de Trofeos — DT ${manager.name}`)
+      .setDescription(
+        `**Club actual:** ${manager.club} (${manager.leagueName || 'Liga'})\n` +
+        `**Trayectoria:** ${totalMatches} partidos dirigidos · ${wins} victorias\n\n` +
+        `🏛️ **${nivel}**\n` +
+        `🏆 Títulos conseguidos: **${trophies.length}**\n` +
+        `⭐ Reputación: **${Math.round(manager.reputation || 50)}/99**`
+      );
+
+    if (trophies.length) {
+      embed.addFields({
+        name: `🏆 Títulos en el Palmarés (${trophies.length})`,
+        value: groupTrophies(trophies).map(g => `• 🏆 **${g.base}** × ${g.count}${g.seasons.length ? ` (T${g.seasons.join(', T')})` : ''}`).join('\n').slice(0, 1024)
+      });
+    } else {
+      embed.addFields({ name: '🏆 Títulos en el Palmarés', value: 'Tu vitrina está esperando su primer trofeo. ¡La directiva y la hinchada confían en vos!' });
+    }
+
+    return { ok: true, ephemeral: false, embeds: [embed], components: [dtContinueRow(userId, manager)] };
+  }
+
+  // ── Modo Jugador ──
+  const trophies = player.career.trophies || [];
+  const awards = player.career.awards || [];
+  const caps = player.career.caps || 0;
+  const nationalGoals = player.career.nationalGoals || 0;
+
+  let nivel;
+  if (trophies.length >= 12) nivel = '👑 Vitrina de Leyenda Absoluta';
+  else if (trophies.length >= 8) nivel = '🏆 Vitrina Dorada';
+  else if (trophies.length >= 5) nivel = '🥇 Vitrina de Ídolo';
+  else if (trophies.length >= 2) nivel = '🥈 Vitrina de Campeón';
+  else if (trophies.length >= 1) nivel = '🥉 Vitrina Inaugurada';
+  else nivel = '🪟 Vitrina en Blanco';
+
+  const embed = new EmbedBuilder()
+    .setColor(0xf1c40f)
+    .setTitle(`🏆 Vitrina de Trofeos — ${player.name}`)
+    .setDescription(
+      `${player.retired ? '🏅 Leyenda retirada.' : `Temporada ${player.season} · ${player.club}`} · ${player.age} años · Media **${player.overall}**\n\n` +
+      `🏛️ **${nivel}**\n` +
+      `🏆 Títulos colectivos: **${trophies.length}** · 🏅 Premios individuales: **${awards.length}**\n` +
+      `⚽ ${player.career.goals} goles · 🅰️ ${player.career.assists} asistencias · 🇨🇱 ${caps} PJ / ${nationalGoals} goles con la selección`
+    );
+
+  if (trophies.length) {
+    embed.addFields({
+      name: `🏆 Títulos Colectivos (${trophies.length})`,
+      value: groupTrophies(trophies).map(g => `• 🏆 **${g.base}** × ${g.count}${g.seasons.length ? ` (T${g.seasons.join(', T')})` : ''}`).join('\n').slice(0, 1024)
+    });
+  } else {
+    embed.addFields({ name: '🏆 Títulos Colectivos', value: 'Tu vitrina todavía no tiene trofeos. ¡Seguí peleando ligas, copas y el Mundial!' });
+  }
+
+  if (awards.length) {
+    embed.addFields({
+      name: `🏅 Premios Individuales (${awards.length})`,
+      value: awards.map(a => `• ${a}`).join('\n').slice(0, 1024)
+    });
+  } else {
+    embed.addFields({ name: '🏅 Premios Individuales', value: 'Sin premios individuales todavía. Brilla en los partidos grandes para ganar el Balón de Oro, la Bota de Oro o el Trofeo Yashin.' });
+  }
+
+  embed.setFooter({ text: 'Cada título y premio que ganes quedará exhibido acá para siempre.' });
+
+  const components = (!player.retired && player.stage !== 'entretemporada') ? [continueRow(userId)] : [];
+  return { ok: true, ephemeral: false, embeds: [embed], components };
+}
+
 function resolveShootoutKick(userId, choiceIndex) {
   const player = storage.getPlayer(userId);
   if (!player) return noPlayer();
@@ -2036,10 +2470,12 @@ function resolveShootoutKick(userId, choiceIndex) {
   let myRoundGoal = false;
   let oppRoundGoal = false;
 
+  const dnaPenaltyBoost = penaltyBoost(player);
+
   if (isGoalkeeper) {
     const defAttr = (player.attributes && (player.attributes.defensa || player.attributes.fisico)) || 50;
     if (picked === oppChoice) {
-      const saveChance = Math.min(0.85, 0.45 + defAttr / 150);
+      const saveChance = Math.min(0.88, 0.45 + defAttr / 150 + dnaPenaltyBoost);
       oppRoundGoal = Math.random() > saveChance;
     } else {
       oppRoundGoal = Math.random() < 0.85;
@@ -2048,7 +2484,7 @@ function resolveShootoutKick(userId, choiceIndex) {
   } else {
     const shootAttr = (player.attributes && (player.attributes.tiro || player.attributes.regate)) || 50;
     if (picked === oppChoice) {
-      const scoreChance = Math.min(0.70, 0.25 + shootAttr / 180);
+      const scoreChance = Math.min(0.75, 0.25 + shootAttr / 180 + dnaPenaltyBoost);
       myRoundGoal = Math.random() < scoreChance;
     } else {
       myRoundGoal = Math.random() < 0.90;
@@ -2242,6 +2678,7 @@ function simulateEntireSeason(userId) {
       ? getContinentalQualification(player.leagueKey, posicion)
       : null;
     player.qualifiedContinentalCup = qual;
+    if (qual) player.qualifiedThisSeason = true;
 
     player.stage = 'copa_nacional';
     player.nationalCup = createNationalCup(player);
@@ -2400,7 +2837,19 @@ function simulateEntireSeason(userId) {
   const leagueName = league ? league.name : 'Liga';
   const countryFlag = flagFor(league ? league.country : '');
 
+  // Objetivos personales de temporada antes de limpiar los stats
+  const objectivesResult = evaluateAndApplyPersonalObjectives(player, {
+    position: posicion,
+    qualifiedContinentalCup: Boolean(player.qualifiedThisSeason)
+  });
+
   const { development, awards } = finishSeason(player);
+  storage.setPlayer(userId, player);
+
+  // Avanzar el universo NPC y preparar los objetivos de la temporada siguiente
+  advanceNpcWorld();
+  player.qualifiedThisSeason = false;
+  player.personalObjectives = generatePersonalObjectives(player);
   storage.setPlayer(userId, player);
 
   const newTrophies = player.career.trophies.slice(initialTrophiesCount);
@@ -2443,6 +2892,13 @@ function simulateEntireSeason(userId) {
     seasonSummaryEmbed.addFields({
       name: `🏅 Distinciones Individuales (${awards.length})`,
       value: awards.map(a => `• ${a}`).join('\n')
+    });
+  }
+
+  if (objectivesResult.text) {
+    seasonSummaryEmbed.addFields({
+      name: '🎯 Objetivos Personales',
+      value: objectivesResult.text
     });
   }
 
@@ -2858,12 +3314,14 @@ function dtSquadView(userId) {
   const starters = xiIds.map(id => squad.find(p => p.id === id)).filter(Boolean);
   const bench = squad.filter(p => !xiIds.includes(p.id));
 
+  const energyOf = (p) => (typeof p.energy === 'number' ? p.energy : (typeof p.stamina === 'number' ? p.stamina : 100));
+
   const startersText = starters.map((p, i) =>
-    `\`#${i + 1}\` **${p.name}** (${p.position}) — Media: **${p.overall}** | Moral: ${p.morale}% | Energía: ${p.energy}% | ⚽ ${p.goals} 🅰️ ${p.assists}`
+    `\`#${i + 1}\` **${p.name}** (${p.position}) — Media: **${p.overall}** | Moral: ${p.morale}% | Energía: ${energyOf(p)}% | ⚽ ${p.goals} 🅰️ ${p.assists}`
   ).join('\n');
 
   const benchText = bench.slice(0, 15).map(p =>
-    `• **${p.name}** (${p.position} ${p.overall}) — Energía: ${p.energy}% | Sueldo: ${(p.wage || 5000).toLocaleString('en-US')}`
+    `• **${p.name}** (${p.position} ${p.overall}) — Energía: ${energyOf(p)}% | Sueldo: ${(p.wage || 5000).toLocaleString('en-US')}`
   ).join('\n');
 
   const embed = new EmbedBuilder()
@@ -2915,21 +3373,34 @@ function dtTacticView(userId, newFormation, newStyle) {
       .setColor(0x2ecc71)
       .setTitle(`📋 Táctica Actualizada · ${manager.club}`)
       .setDescription(
-        `✅ Formación: **${res.formation}**\n` +
-        `✅ Estilo de Juego: **${res.style}** (${TACTICAL_STYLES[res.style]?.label || res.style})\n\n` +
-        `*${TACTICAL_STYLES[res.style]?.desc || ''}*`
+        `✅ Formación: **${res.formation}** (${res.formationName})\n` +
+        `✅ Estilo de Juego: **${res.styleName}**\n\n` +
+        `*${TACTICAL_STYLES[res.tacticStyle]?.desc || ''}*`
       );
     return { ok: true, ephemeral: false, embeds: [embed], components: [dtContinueRow(userId, manager)] };
   }
 
-  const formList = Object.entries(FORMATIONS).map(([k, v]) => `• **${k}**: ${v.def} DEF - ${v.mid} MED - ${v.att} DEL`).join('\n');
-  const styleList = Object.entries(TACTICAL_STYLES).map(([k, v]) => `• **${k}** (${v.label}): ${v.desc}`).join('\n');
+  const countLines = (slots) => {
+    let def = 0;
+    let mid = 0;
+    let att = 0;
+    for (const s of slots) {
+      if (s.id === 'POR') continue;
+      if (/^(DF|CA|LIB)/.test(s.id)) def++;
+      else if (/^(MC|MI|MD|MCD|MCO)/.test(s.id)) mid++;
+      else att++;
+    }
+    return `${def} DEF - ${mid} MED - ${att} DEL`;
+  };
+
+  const formList = Object.entries(FORMATIONS).map(([k, v]) => `• **${k}**: ${countLines(v.slots)}`).join('\n');
+  const styleList = Object.entries(TACTICAL_STYLES).map(([k, v]) => `• **${k}** (${v.name}): ${v.desc}`).join('\n');
 
   const embed = new EmbedBuilder()
     .setColor(0x34495e)
     .setTitle(`📋 Pizarra Táctica & Estrategia · DT ${manager.name}`)
     .setDescription(
-      `Formación actual: **${manager.formation}** | Estilo: **${TACTICAL_STYLES[manager.tacticStyle]?.label || manager.tacticStyle}**\n\n` +
+      `Formación actual: **${manager.formation}** | Estilo: **${TACTICAL_STYLES[manager.tacticStyle]?.name || manager.tacticStyle}**\n\n` +
       `📐 **Formaciones Disponibles:**\n${formList}\n\n` +
       `🧠 **Estilos Tácticos:**\n${styleList}\n\n` +
       `💡 Para cambiar usa: \`/dt tactica [formacion] [estilo]\``
@@ -2954,8 +3425,8 @@ function dtTeamTalkView(userId, talkId) {
         `**DT ${manager.name}:** *"${res.talk.text}"*\n\n` +
         `💬 **Efecto en el Plantel:**\n` +
         `• Reacción: ${res.talk.desc}\n` +
-        `• Modificador de Moral: **+${res.talk.moraleBoost}**\n` +
-        `• Foco Táctico: **+${res.talk.focusBoost}%**`
+        `• Modificador de Moral: **${res.talk.morale >= 0 ? '+' : ''}${res.talk.morale}**\n` +
+        `• Foco Táctico: **+${res.talk.focusBoost || 0}%** para el próximo partido`
       );
     return { ok: true, ephemeral: false, embeds: [embed], components: [dtContinueRow(userId, manager)] };
   }
@@ -3302,6 +3773,7 @@ module.exports = {
   trainView,
   trainSkillAction,
   awardsView,
+  vitrinaView,
   continueRow,
   shootoutRow,
   shootoutEmbed,
@@ -3337,5 +3809,13 @@ module.exports = {
   newsFeedView,
   academyView,
   worldRankingView,
-  hallOfFameView
+  hallOfFameView,
+  stadiumView,
+  fansView,
+  dnaView,
+  objectivesView,
+  recordsView,
+  goatView,
+  marketView,
+  wonderkidsView
 };

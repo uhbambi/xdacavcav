@@ -66,13 +66,13 @@ module.exports = {
         .setName('tactica')
         .setDescription('Cambiar tu formación y estilo táctico de juego')
         .addStringOption(opt => opt.setName('formacion').setDescription('Ej: 4-3-3, 4-4-2, 3-5-2, 5-3-2').setRequired(false))
-        .addStringOption(opt => opt.setName('estilo').setDescription('Ej: ofensivo, tiki-taka, contraataque, autobus, equilibrado').setRequired(false))
+        .addStringOption(opt => opt.setName('estilo').setDescription('Ej: ofensivo, tiki_taka, contraataque, presion_alta, cerrojo, equilibrado').setRequired(false))
     )
     .addSubcommand(sub =>
       sub
         .setName('charla')
         .setDescription('Dar una charla motivacional o de vestuario al plantel')
-        .addStringOption(opt => opt.setName('tipo').setDescription('motivacion, furia, concentracion, calma, gloria').setRequired(false))
+        .addStringOption(opt => opt.setName('tipo').setDescription('motivacional, tactica, tranquilidad, exigencia').setRequired(false))
     )
     .addSubcommand(sub =>
       sub

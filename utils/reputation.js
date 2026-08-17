@@ -114,9 +114,40 @@ function getReputationTier(popularity) {
   return { title: 'Perfil Bajo 🤫', desc: 'Enfocado en la cancha, lejos de los focos' };
 }
 
+/**
+ * Cita de la prensa deportiva según el estatus mediático del jugador.
+ */
+function getPressQuote({ reputacion = 0, popularidad = 0, prestigio = 0 } = {}) {
+  if (popularidad >= 90 && prestigio >= 60) return 'Una superestrella mundial que llena estadios y define partidos en cualquier rincón del planeta.';
+  if (popularidad >= 75) return 'Un nombre que vende camisetas y protagoniza portadas: la prensa lo sigue a todos lados.';
+  if (reputacion >= 75) return 'Un profesional respetado en todos los vestuarios y admirado por los entrenadores rivales.';
+  if (popularidad >= 50) return 'Un jugador en plena expansión mediática, cada vez más habitual en los titulares deportivos.';
+  if (reputacion >= 50) return 'Un futbolista serio y confiable que se gana el respeto partido a partido.';
+  return 'Un perfil que se hace notar en la cancha, aunque todavía lejos de los flashes.';
+}
+
+/**
+ * Resumen completo del estatus del jugador para /perfil y /reputacion:
+ * reputación, popularidad, prestigio, etiqueta de estatus y veredicto de prensa.
+ */
+function getReputationSummary(player) {
+  const stats = normalizeReputationStats(player);
+  const tier = getReputationTier(stats.popularidad);
+
+  return {
+    reputation: stats.reputacion,
+    popularity: stats.popularidad,
+    prestige: stats.prestigio,
+    tierLabel: tier.title,
+    tierDesc: tier.desc,
+    pressQuote: getPressQuote(stats)
+  };
+}
+
 module.exports = {
   normalizeReputationStats,
   recordMatchReputation,
   applyMediaEvent,
-  getReputationTier
+  getReputationTier,
+  getReputationSummary
 };

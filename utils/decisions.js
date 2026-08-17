@@ -296,6 +296,10 @@ const EVENTOS_CARRERA = [
   }
 ];
 
+// Drama futbolístico: eventos pesados que amplían el banco de momentos decisivos.
+const { DRAMA_MOMENTOS } = require('./drama.js');
+MOMENTOS.push(...DRAMA_MOMENTOS);
+
 function maybePickMomento(chance = 0.35) {
   if (Math.random() > chance) return null;
   return pick(MOMENTOS);

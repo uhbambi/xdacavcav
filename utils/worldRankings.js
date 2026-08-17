@@ -3,6 +3,7 @@
 const storage = require('../data/storage.js');
 const { formatMoney } = require('./economy.js');
 const { FLAGS } = require('../data/clubs.js');
+const { getNpcWorld } = require('./npcWorld.js');
 
 function flagFor(country) {
   return FLAGS[country] || '🇨🇱';
@@ -50,7 +51,32 @@ function getAllUniversePlayers() {
     isUser: false
   }));
 
-  return [...userList, ...globalList];
+  // NPC del mundo persistente (generaciones, promesas y estrellas procedimentales)
+  let npcList = [];
+  try {
+    const world = getNpcWorld();
+    npcList = (world.players || [])
+      .filter(p => p.status === 'active')
+      .map(p => ({
+        name: p.name,
+        position: p.position,
+        club: p.club || 'Agente libre',
+        nationality: p.nationality || 'Chile',
+        overall: p.overall || 60,
+        potential: p.potential || 75,
+        age: p.age || 18,
+        goals: p.career?.goals || 0,
+        assists: p.career?.assists || 0,
+        trophies: p.career?.trophies || 0,
+        value: p.value || 1000000,
+        isUser: false,
+        isNpc: true
+      }));
+  } catch (e) {
+    npcList = [];
+  }
+
+  return [...userList, ...globalList, ...npcList];
 }
 
 /**
