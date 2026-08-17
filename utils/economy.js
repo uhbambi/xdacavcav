@@ -63,7 +63,7 @@ function calculateMarketValue(player) {
   else if (age <= 37) ageFactor = 0.25;
   else ageFactor = 0.10;
 
-  // Factor Posición (Delanteros y extremos valen más en el mercado)
+  // Factor Posición
   let posFactor = 1.0;
   if (pos === 'DEL' || pos === 'EXT') posFactor = 1.15;
   else if (pos === 'MED' || pos === 'VOL') posFactor = 1.05;
@@ -99,7 +99,7 @@ function calculateReleaseClause(player, marketValue) {
 }
 
 /**
- * Calcula el sueldo semanal y anual (€)
+ * Calcula el sueldo semanal, anual y bonos (€)
  */
 function calculateWages(player) {
   const ovr = player.overall || 60;
@@ -110,7 +110,10 @@ function calculateWages(player) {
   const annualWage = Math.max(25000, annualBase);
   const weeklyWage = Math.round(annualWage / 52);
 
-  return { annualWage, weeklyWage };
+  const goalBonus = player.goalBonus || Math.round(1500 * clubTier * (ovr / 50));
+  const trophyBonus = player.trophyBonus || Math.round(25000 * clubTier);
+
+  return { annualWage, weeklyWage, goalBonus, trophyBonus };
 }
 
 /**
@@ -131,7 +134,7 @@ function calculateNetWorth(player) {
  * Calcula los gastos semanales de mantenimiento
  */
 function calculateWeeklyExpenses(player) {
-  let expenses = 500; // Gastos de vida base
+  let expenses = 500;
   if (player.mansionPurchased) expenses += 3500;
   if (player.supercarPurchased) expenses += 1200;
   if (player.trainerPurchased) expenses += 1500;
@@ -144,15 +147,28 @@ function calculateWeeklyExpenses(player) {
  */
 function normalizeEconomy(player) {
   if (!player.agent) {
-    player.agent = AGENT_PROFILES[3]; // Inicia con representación familiar o modesta
+    player.agent = AGENT_PROFILES[3];
   }
   if (!player.contractYears) {
     player.contractYears = rand(2, 4);
   }
+  const clubTier = player.clubTier || 1;
   if (!player.goalBonus) {
-    const clubTier = player.clubTier || 1;
-    player.goalBonus = Math.round(1500 * clubTier * (player.overall / 50));
+    player.goalBonus = Math.round(1500 * clubTier * ((player.overall || 60) / 50));
+  }
+  if (!player.trophyBonus) {
     player.trophyBonus = Math.round(25000 * clubTier);
+  }
+  if (!player.marketValue) {
+    player.marketValue = calculateMarketValue(player);
+  }
+  if (!player.releaseClause) {
+    player.releaseClause = calculateReleaseClause(player, player.marketValue);
+  }
+  if (!player.weeklyWage) {
+    const wages = calculateWages(player);
+    player.weeklyWage = wages.weeklyWage;
+    player.salary = wages.annualWage;
   }
   return player;
 }
@@ -161,13 +177,14 @@ function normalizeEconomy(player) {
  * Formatea cantidades en millones / miles de Euros (€)
  */
 function formatMoney(amount) {
-  if (amount >= 1000000) {
-    return `€${(amount / 1000000).toFixed(2)}M`;
+  const num = typeof amount === 'number' ? amount : (parseFloat(amount) || 0);
+  if (num >= 1000000) {
+    return `€${(num / 1000000).toFixed(2)}M`;
   }
-  if (amount >= 1000) {
-    return `€${(amount / 1000).toFixed(0)}K`;
+  if (num >= 1000) {
+    return `€${(num / 1000).toFixed(0)}K`;
   }
-  return `€${amount.toLocaleString('es-CL')}`;
+  return `€${num.toLocaleString('es-CL')}`;
 }
 
 module.exports = {
