@@ -55,7 +55,7 @@ function formatTimelineEmbedText(player) {
 
   const lines = history.map(h => {
     const trophiesStr = h.trophiesWon.length > 0 ? ` 🏆 ${h.trophiesWon.join(', ')}` : '';
-    const awardsStr = h.awardsWon.length > 0 ? ` ⭐ ${h.awardsWon.map(a => a.split(' ')[0] + ' ' + a.split(' ')[1]).join(', ')}` : '';
+    const awardsStr = h.awardsWon.length > 0 ? ` ⭐ ${h.awardsWon.map(a => a.split(' ')[0] + ' ' + (a.split(' ')[1] || '')).join(', ')}` : '';
     const isPortero = player.position === 'POR';
     const statsStr = isPortero
       ? `${h.apps} PJ | ${h.cleanSheets} Invictas | ⭐ ${h.avgRating}`
@@ -89,5 +89,6 @@ function getCareerAggregateTotals(player) {
 module.exports = {
   recordSeasonInTimeline,
   formatTimelineEmbedText,
+  formatCareerTimeline: formatTimelineEmbedText,
   getCareerAggregateTotals
 };
