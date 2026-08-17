@@ -28,6 +28,20 @@ const {
   generateManagerOffers, acceptManagerJobOffer, getManagerRetirementVerdict, retireManager, simulateEntireDTSeason
 } = require('../utils/manager.js');
 
+// 15 Deep Simulation Systems
+const { checkForInjury, applyInjury, advanceInjury, treatInjury, formatInjuryStatus, getInjuryRiskProfile } = require('../utils/injuries.js');
+const { normalizeEconomy, calculateMarketValue, calculateReleaseClause, calculateWages, calculateWeeklyExpenses, calculateNetWorth, formatMoney } = require('../utils/economy.js');
+const { normalizeReputationStats, recordMatchReputation, getReputationSummary } = require('../utils/reputation.js');
+const { formatCareerTimeline, recordSeasonInTimeline } = require('../utils/careerTimeline.js');
+const { getNationalTeamStatus, getFIFARankings } = require('../utils/nationalTeams.js');
+const { generateSocialFeed } = require('../utils/socialMedia.js');
+const { generateNewsFeed } = require('../utils/newsEngine.js');
+const { getClubAcademy, promoteProspect, generateYouthAcademy } = require('../utils/academy.js');
+const { inductIntoHallOfFame, formatHallOfFameEmbed } = require('../utils/hallOfFame.js');
+const { getTopOverall, getTopMarketValue, getTopWonderkids, getTopByCountry } = require('../utils/worldRankings.js');
+const { getWorldState, simulateGlobalWorldWindow } = require('../utils/persistentWorld.js');
+const { normalizePersonality } = require('../utils/personality.js');
+
 function flagFor(country) {
   return FLAGS[country] || '';
 }
@@ -290,9 +304,31 @@ function applyMatchToPlayer(player, result, { national = false } = {}) {
   player.morale = Math.max(10, Math.min(100,
     player.morale + (result.result === 'V' ? 4 : result.result === 'E' ? 0 : -5) + result.playerGoals * 3));
 
-  if (result.injuredMatches > 0) {
+  // 1. Sistema de Lesiones en Partido
+  const injuryCheck = checkForInjury(player, { isDerby: Boolean(result.isClassic) });
+  if (injuryCheck.injured) {
+    applyInjury(player, injuryCheck.injury);
+    result.matchInjury = injuryCheck.injury;
+    if (result.events) {
+      result.events.push({ minute: 88, text: `🚑 **${player.name}** sufre una molestia física y abandona el campo: *${injuryCheck.injury.name}* (${injuryCheck.injury.matches} partidos de baja).` });
+    }
+  } else if (result.injuredMatches > 0) {
     player.injuredMatches = Math.max(player.injuredMatches, result.injuredMatches);
   }
+
+  // 2. Sistema de Reputación Dinámica
+  recordMatchReputation(player, {
+    rating: result.rating,
+    goals: result.playerGoals,
+    assists: result.playerAssists,
+    motm: result.motm,
+    cleanSheet: result.cleanSheet,
+    isClassic: Boolean(result.isClassic)
+  });
+
+  // 3. Sistema de Redes Sociales y Noticias Dinámicas
+  player.lastSocialFeed = generateSocialFeed(player, result);
+  player.lastNewsFeed = generateNewsFeed(player, { matchResult: result });
 }
 
 /** Punto de entrada de cada paso de la carrera */
@@ -449,8 +485,9 @@ function playWhileSuspended(userId, player) {
  * El jugador está lesionado: el partido SE JUEGA igual (sin él) y la carrera avanza.
  */
 function playWhileInjured(userId, player) {
-  player.injuredMatches -= 1;
+  const recovery = advanceInjury(player);
   const restantes = player.injuredMatches;
+  const injuryInfo = player.injury ? ` (${player.injury.name})` : '';
 
   if (player.stage === 'liga') {
     const result = playMatchdayWithoutPlayer(player);
@@ -464,8 +501,8 @@ function playWhileInjured(userId, player) {
       .setTitle(`🚑 ${flagFor(league.country)} ${league.name} · Fecha ${result.matchday}/${result.total} (lesionado)`)
       .setDescription(
         `**${player.club} ${result.myGoals} - ${result.oppGoals} ${result.opponent}**\n\n` +
-        `**${player.name}** vio el partido desde la tribuna.\n` +
-        (restantes > 0 ? `Te quedan **${restantes}** partidos de baja.` : '✅ ¡Te recuperaste! El próximo partido lo jugás.')
+        `**${player.name}** vio el partido desde la tribuna por lesión${injuryInfo}.\n` +
+        (restantes > 0 ? `Te quedan **${restantes}** partidos de baja médica.` : '✅ ¡Alta médica conseguida! El próximo partido ya puedes volver a la cancha.')
       );
     return { ok: true, ephemeral: false, embeds: [embed], components: [continueRow(userId)] };
   }
@@ -491,9 +528,9 @@ function playWhileInjured(userId, player) {
     .setTitle(`🚑 ${tournament.name} · ${phaseLabel(tournament)} (lesionado)`)
     .setDescription(
       `**${tournament.myTeam} ${result.myGoals} - ${result.oppGoals} ${result.opponent}**\n\n` +
-      `**${player.name}** se perdió el partido por lesión.\n` +
+      `**${player.name}** se perdió el partido por lesión${injuryInfo}.\n` +
       (outcome.text ? `\n${outcome.text}\n` : '') +
-      (restantes > 0 ? `Te quedan **${restantes}** partidos de baja.` : '✅ ¡Te recuperaste!')
+      (restantes > 0 ? `Te quedan **${restantes}** partidos de baja médica.` : '✅ ¡Alta médica! Habilitado para la próxima ronda.')
     );
 
   storage.setPlayer(userId, player);
@@ -950,13 +987,24 @@ function finishSeasonFlow(userId, player, leadingDesc) {
 
   const { development, awards } = finishSeason(player);
 
+  // 4. Registrar temporada en Timeline Histórico
+  recordSeasonInTimeline(player, {
+    trophiesWon: player.career.trophies || [],
+    awardsWon: awards || []
+  });
+
+  // 16. Mover el mercado del universo persistente
+  simulateGlobalWorldWindow();
+
   const growthText = development.growth >= 0
-    ? `📈 Media: **${player.overall}** (${development.growth >= 0 ? '+' : ''}${development.growth}) · Edad: ${player.age}`
-    : `📉 Media: **${player.overall}** (${development.growth}) · Edad: ${player.age}`;
+    ? `📈 Media: **${player.overall}** (${development.growth >= 0 ? '+' : ''}${development.growth}) · Edad: ${player.age} · Potencial: **${player.potential}**`
+    : `📉 Media: **${player.overall}** (${development.growth}) · Edad: ${player.age} · Potencial: **${player.potential}**`;
 
   const gainedText = Object.entries(development.gained || {})
     .map(([key, value]) => `${ATTR_LABELS[key]} ${value >= 0 ? '+' : ''}${value}`)
     .join(' · ');
+
+  const econSummary = `💰 Sueldo neto anual: **${formatMoney(development.annualSalary || player.salary)}** · Patrimonio: **${formatMoney(player.bank || 0)}** · Valor de Mercado: **${formatMoney(player.marketValue || 1000000)}**`;
 
   const embed = new EmbedBuilder()
     .setColor(0x9b59b6)
@@ -964,8 +1012,8 @@ function finishSeasonFlow(userId, player, leadingDesc) {
     .setDescription(
       `${leadingDesc}\n\n${growthText}` +
       (gainedText ? `\n${gainedText}` : '') +
-      (awards.length ? `\n\n🏅 Premios: ${awards.join(' · ')}` : '') +
-      `\n\n💰 Salario anual cobrado: **${(player.salary || 50000).toLocaleString('en-US')}** · Saldo en cuenta: **${(player.bank || 0).toLocaleString('en-US')}**`
+      (awards.length ? `\n\n🏅 Premios de la temporada:\n${awards.map(a => `• ${a}`).join('\n')}` : '') +
+      `\n\n${econSummary}`
     );
 
   // Generar nuevo objetivo para la siguiente temporada
@@ -974,29 +1022,34 @@ function finishSeasonFlow(userId, player, leadingDesc) {
     player.currentObjective = generateSeasonObjective(player, currentLeague);
   }
 
-
   // Retiro a los 42 años o voluntario
   if (player.retired || player.age >= 42) {
     player.retired = true;
-    storage.setPlayer(userId, player);
     const verdict = retirementVerdict(player);
+    
+    // 13. Consagrar en el Salón de la Fama
+    const legend = inductIntoHallOfFame(player, verdict);
+
+    storage.setPlayer(userId, player);
+
     const retireEmbed = new EmbedBuilder()
       .setColor(0xf1c40f)
       .setTitle(`👑 ¡CARRERA FINALIZADA A LOS ${player.age} AÑOS! — ${player.name}`)
       .setDescription(
-        `🏆 **Rango de Leyenda:** ${verdict.title}\n\n` +
-        `*"${verdict.summary}"*\n\n` +
+        `🏆 **Rango de Leyenda:** ${verdict.titulo || verdict.title}\n\n` +
+        `*"${verdict.summary || 'Una trayectoria grabada con letras de oro en los anales del fútbol.'}"*\n\n` +
+        `🏛️ **¡Consagrado en el Salón de la Fama Oficial!** Consulta tu lugar con \`/salon-fama\`.\n\n` +
         `📊 **Estadísticas Finales de Carrera:**\n` +
         `• Partidos Jugados: **${player.career.apps}**\n` +
         `• Goles: **${player.career.goals}** · Asistencias: **${player.career.assists}**\n` +
         `• Selección Nacional: **${player.career.caps}** PJ / **${player.career.nationalGoals}** goles\n` +
         `• Títulos Ganados: **${player.career.trophies.length}**\n` +
         `• Premios Individuales: **${player.career.awards.length}**\n` +
-        `• Fortuna Acumulada: **$${(player.bank || 0).toLocaleString('en-US')}**\n\n` +
+        `• Fortuna Acumulada: **${formatMoney(player.bank || 0)}**\n\n` +
         (player.career.trophies.length ? `🏆 **Títulos:**\n${player.career.trophies.slice(0, 10).map(t => `• ${t}`).join('\n')}\n\n` : '') +
         (player.career.awards.length ? `🏅 **Premios:**\n${player.career.awards.slice(0, 10).map(a => `• ${a}`).join('\n')}\n\n` : '') +
         `👔 **¿Cuál es tu siguiente paso?**\n` +
-        `• Puedes asumir como **Director Técnico (DT)** en tu club con \`/dt\` o desde el panel web.\n` +
+        `• Puedes asumir como **Director Técnico (DT)** en tu club con \`/dt\`.\n` +
         `• O iniciar una nueva dinastía con \`/crear-jugador\`.`
       );
     return { ok: true, ephemeral: false, embeds: [embed, retireEmbed], components: [] };
@@ -1169,12 +1222,21 @@ function profileView(userId) {
   if (player.chefPurchased) inventorySummary.push('🥗 Chef Élite');
   if (player.superagentPurchased) inventorySummary.push('🤝 Superagente');
   if (player.supercarPurchased) inventorySummary.push('🏎️ Superdeportivo');
-  if (player.realEstateCount > 0) inventorySummary.push(`🏢 Negocios Inmobiliarios (x${player.realEstateCount})`);
+  if (player.realEstateCount > 0) inventorySummary.push(`🏢 Inmuebles (x${player.realEstateCount})`);
+
+  const repSummary = getReputationSummary(player);
+  const personalityEmoji = player.personality?.emoji || '⚽';
+  const personalityName = player.personality?.name || 'Profesional Equilibrado';
+  const injuryStatus = formatInjuryStatus(player);
 
   const embed = new EmbedBuilder()
     .setColor(0x3498db)
-    .setTitle(`${player.retired ? '🏅 ' : '⚽ '}${player.name} — media ${player.overall}`)
-    .setDescription(player.retired ? 'Jugador retirado.' : `Temporada ${player.season} · ${stageLabel}${player.injuredMatches > 0 ? ` · 🚑 ${player.injuredMatches} partidos de baja` : ''}${player.suspendedMatches > 0 ? ` · 🟥 ${player.suspendedMatches} partido(s) suspendido` : ''}`)
+    .setTitle(`${player.retired ? '🏅 ' : '⚽ '}${player.name} — Media ${player.overall}`)
+    .setDescription(
+      (player.retired ? 'Jugador retirado.' : `Temporada ${player.season} · ${stageLabel}${player.injuredMatches > 0 ? ` · 🚑 ${player.injuredMatches} partidos de baja` : ''}${player.suspendedMatches > 0 ? ` · 🟥 ${player.suspendedMatches} partido(s) suspendido` : ''}`) +
+      `\n🎭 **Personalidad:** ${personalityEmoji} **${personalityName}**\n` +
+      `📈 **Estatus:** Reputación: **${repSummary.reputation}** | Popularidad: **${repSummary.popularity}** | Prestigio: **${repSummary.prestige}** (${repSummary.tierLabel})`
+    )
     .addFields(
       { name: 'Club', value: `${league ? flagFor(league.country) : ''} ${player.club} (media ${player.clubMedia})`, inline: true },
       { name: 'Liga', value: `${league ? league.name : '—'}`, inline: true },
@@ -1182,10 +1244,36 @@ function profileView(userId) {
       { name: 'Edad', value: `${player.age} años (Máx: 42)`, inline: true },
       { name: 'Potencial', value: `${player.potential}`, inline: true },
       { name: 'Moral', value: `${player.morale}/100`, inline: true },
-      { name: '💰 Finanzas', value: `Banco: **${(player.bank || 0).toLocaleString('en-US')}**\nSueldo: **${(player.salary || 25000).toLocaleString('en-US')}**/año`, inline: true },
-      { name: '📊 Esta temporada', value: `PJ: ${s.apps} | Goles: ${s.goals} | Asist: ${s.assists}${player.position === 'POR' ? ` | Vallas Invictas: ${s.cleanSheets || 0}` : ''} | 🟨 ${s.yellow} | 🟥 ${s.red} | Rating: ${avg}`, inline: false },
-      { name: '🏆 Carrera', value: `PJ: ${player.career.apps} | Goles: ${player.career.goals} | Asist: ${player.career.assists} | Selección: ${player.career.caps} PJ / ${player.career.nationalGoals} goles`, inline: false },
-      { name: '⚡ Atributos', value: describeAttributes(player.attributes), inline: false }
+      {
+        name: '💰 Economía',
+        value: `Valor: **${formatMoney(player.marketValue || 1000000)}**\nSueldo: **${formatMoney(player.weeklyWage || 500)}/sem**\nContrato: **${player.contractYears || 2} años** (Cláusula: ${formatMoney(player.releaseClause || 3000000)})`,
+        inline: true
+      },
+      {
+        name: '🏦 Patrimonio',
+        value: `Banco: **${formatMoney(player.bank || 0)}**\nRepresentante: **${player.agent?.name || 'Familiar / Local'}**`,
+        inline: true
+      },
+      {
+        name: '🩺 Estado Físico',
+        value: injuryStatus,
+        inline: true
+      },
+      {
+        name: '📊 Esta temporada',
+        value: `PJ: ${s.apps} | Goles: ${s.goals} | Asist: ${s.assists}${player.position === 'POR' ? ` | Vallas Invictas: ${s.cleanSheets || 0}` : ''} | 🟨 ${s.yellow} | 🟥 ${s.red} | Rating: ${avg}`,
+        inline: false
+      },
+      {
+        name: '🏆 Carrera',
+        value: `PJ: ${player.career.apps} | Goles: ${player.career.goals} | Asist: ${player.career.assists} | Selección: ${player.career.caps} PJ / ${player.career.nationalGoals} goles`,
+        inline: false
+      },
+      {
+        name: '⚡ Atributos',
+        value: describeAttributes(player.attributes),
+        inline: false
+      }
     );
 
   if (inventorySummary.length) {
@@ -1200,6 +1288,277 @@ function profileView(userId) {
 
   const components = (!player.retired && player.stage !== 'entretemporada') ? [continueRow(userId)] : [];
   return { ok: true, ephemeral: false, embeds: [embed], components };
+}
+
+// ─────────────────────────── Nuevas Vistas y Acciones ───────────────────────────
+
+/** 1. Vista de Lesiones y Gestión Médica */
+function injuryView(userId) {
+  const player = storage.getPlayer(userId);
+  if (!player) return noPlayer();
+
+  const risk = getInjuryRiskProfile(player);
+  const status = formatInjuryStatus(player);
+  const history = player.injuryHistory || [];
+
+  const embed = new EmbedBuilder()
+    .setColor(player.injuredMatches > 0 ? 0xe74c3c : 0x2ecc71)
+    .setTitle(`🩺 Departamento Médico & Fisioterapia — ${player.name}`)
+    .setDescription(
+      `**Estado Actual:** ${status}\n\n` +
+      `📊 **Perfil de Riesgo Físico:**\n` +
+      `• Nivel de Riesgo: **${risk.riskLevel}** (${risk.riskScore}%)\n` +
+      `• Edad: **${risk.age} años** | Físico: **${risk.physicalScore}/99**\n` +
+      `• Instalaciones: ${player.mansionPurchased ? '🏡 Centro Alto Rendimiento (-50% riesgo)' : 'Estándar'}\n` +
+      `• Equipo Médico: ${player.trainerPurchased ? '🏋️‍♂️ Fisio VIP Activo' : 'Cuerpo Médico del Club'}\n\n` +
+      (player.injuredMatches > 0
+        ? `💉 **Tratamientos Disponibles:**\n` +
+          `1️⃣ **Fisioterapia Intensiva:** Reduce 1-2 partidos por **$40,000**\n` +
+          `2️⃣ **Clínica Quirúrgica Suiza:** Reduce 3-5 partidos por **$120,000**\n`
+        : '✅ Estás al 100% de tus capacidades físicas para competir.')
+    );
+
+  if (history.length > 0) {
+    const historyLines = history.slice(-5).map(h =>
+      `• **${h.name}** (${h.type}): ${h.matches} partidos de baja (Temp. ${h.season || 1})`
+    );
+    embed.addFields({ name: '📋 Historial Médico Reciente', value: historyLines.join('\n') });
+  }
+
+  const components = [];
+  if (player.injuredMatches > 0 && !player.retired) {
+    components.push(
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`treat:${userId}:physio`).setLabel('Fisioterapia ($40k)').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(`treat:${userId}:surgery`).setLabel('Clínica Suiza ($120k)').setStyle(ButtonStyle.Success)
+      )
+    );
+  }
+
+  return { ok: true, ephemeral: false, embeds: [embed], components };
+}
+
+/** Acción de tratamiento médico */
+function injuryTreatAction(userId, treatmentType) {
+  const player = storage.getPlayer(userId);
+  if (!player) return noPlayer();
+
+  const res = treatInjury(player, treatmentType);
+  if (!res.success) {
+    return { ok: false, ephemeral: true, content: `❌ ${res.reason}` };
+  }
+
+  storage.setPlayer(userId, player);
+  return injuryView(userId);
+}
+
+/** 2. Vista de Economía Detallada */
+function economyView(userId) {
+  const player = storage.getPlayer(userId);
+  if (!player) return noPlayer();
+
+  const netWorth = calculateNetWorth(player);
+  const weeklyExpenses = calculateWeeklyExpenses(player);
+  const { annualWage, weeklyWage, goalBonus, trophyBonus } = calculateWages(player);
+
+  const embed = new EmbedBuilder()
+    .setColor(0x2ecc71)
+    .setTitle(`💰 Finanzas, Contrato y Patrimonio — ${player.name}`)
+    .setDescription(
+      `🏛️ **Patrimonio Neto Total:** **${formatMoney(netWorth)}**\n` +
+      `🏦 **Liquidez Bancaria:** **${formatMoney(player.bank || 0)}**\n\n` +
+      `📄 **Contrato Actual:**\n` +
+      `• Club: **${player.club}**\n` +
+      `• Sueldo Semanal: **${formatMoney(weeklyWage)}/sem**\n` +
+      `• Sueldo Anual: **${formatMoney(annualWage)}/año**\n` +
+      `• Duración restante: **${player.contractYears || 2} años**\n` +
+      `• Valor de Mercado: **${formatMoney(player.marketValue || 1000000)}**\n` +
+      `• Cláusula de Rescisión: **${formatMoney(player.releaseClause || 3000000)}**\n\n` +
+      `🎁 **Bonos por Rendimiento:**\n` +
+      `• Prima por Gol/Asistencia: **${formatMoney(goalBonus)}**\n` +
+      `• Prima por Título Oficial: **${formatMoney(trophyBonus)}**\n\n` +
+      `🤝 **Representante Deportivo:**\n` +
+      `• Agente: **${player.agent?.name || 'Familiar / Local'}** (${player.agent?.specialty || 'Representación básica'})\n` +
+      `• Comisión por transferencia: **${player.agent?.commission || 10}%**\n\n` +
+      `💸 **Gastos y Mantenimiento:**\n` +
+      `• Gastos de vida y estilo: **${formatMoney(weeklyExpenses)}/sem** (~${formatMoney(weeklyExpenses * 52)}/año)`
+    );
+
+  return { ok: true, ephemeral: false, embeds: [embed], components: (!player.retired && player.stage !== 'entretemporada') ? [continueRow(userId)] : [] };
+}
+
+/** 3. Vista de Reputación y Personalidad */
+function reputationView(userId) {
+  const player = storage.getPlayer(userId);
+  if (!player) return noPlayer();
+
+  const rep = getReputationSummary(player);
+  const pers = player.personality || { name: 'Profesional Equilibrado', emoji: '⚽', desc: 'Dedicado y constante' };
+
+  const embed = new EmbedBuilder()
+    .setColor(0xe67e22)
+    .setTitle(`📈 Reputación, Fama & Prensa — ${player.name}`)
+    .setDescription(
+      `🎭 **Rasgo de Personalidad:** ${pers.emoji} **${pers.name}**\n` +
+      `*${pers.desc}*\n\n` +
+      `📊 **Métricas Mediáticas:**\n` +
+      `• **Reputación:** ⭐ **${rep.reputation}/99** (Nivel de respeto deportivo global)\n` +
+      `• **Popularidad:** 🔥 **${rep.popularity}/99** (Seguidores, marcas y valor comercial)\n` +
+      `• **Prestigio:** 👑 **${rep.prestige}/99** (Peso histórico en grandes torneos)\n` +
+      `• **Estatus Mediático:** **${rep.tierLabel}**\n\n` +
+      `🎙️ **Veredicto de la Prensa:**\n` +
+      `*"${rep.pressQuote}"*`
+    );
+
+  return { ok: true, ephemeral: false, embeds: [embed], components: (!player.retired && player.stage !== 'entretemporada') ? [continueRow(userId)] : [] };
+}
+
+/** 4. Vista de Timeline e Historial Completo */
+function timelineView(userId) {
+  const player = storage.getPlayer(userId);
+  if (!player) return noPlayer();
+
+  const timelineText = formatCareerTimeline(player);
+  const embed = new EmbedBuilder()
+    .setColor(0x34495e)
+    .setTitle(`📜 Historial Temporada a Temporada — ${player.name}`)
+    .setDescription(timelineText.slice(0, 4000));
+
+  return { ok: true, ephemeral: false, embeds: [embed], components: (!player.retired && player.stage !== 'entretemporada') ? [continueRow(userId)] : [] };
+}
+
+/** 5. Vista de Selección Nacional y Ranking FIFA */
+function nationalTeamView(userId) {
+  const player = storage.getPlayer(userId);
+  if (!player) return noPlayer();
+
+  const status = getNationalTeamStatus(player);
+  const rankings = getFIFARankings();
+
+  const rankingLines = rankings.slice(0, 8).map((r, i) =>
+    `\`#${i + 1}\` ${r.flag} **${r.nation}** (${r.points} pts)`
+  ).join('\n');
+
+  const embed = new EmbedBuilder()
+    .setColor(0x2980b9)
+    .setTitle(`🇨🇱 Selección Nacional — ${player.nationality || 'Chile'}`)
+    .setDescription(
+      `👤 **Estado del Jugador:**\n` +
+      `• Convocable: ${status.eligible ? '✅ Sí' : '❌ No (Media o reputación baja)'}\n` +
+      `• Estatus en el plantel: **${status.status}**\n` +
+      `• Partidos con la Selección: **${player.career.caps || 0} PJ**\n` +
+      `• Goles Internacionales: **${player.career.nationalGoals || 0} ⚽**\n\n` +
+      `🌍 **Ranking FIFA Oficial:**\n${rankingLines}`
+    );
+
+  return { ok: true, ephemeral: false, embeds: [embed], components: (!player.retired && player.stage !== 'entretemporada') ? [continueRow(userId)] : [] };
+}
+
+/** 6. Vista de Redes Sociales */
+function socialFeedView(userId) {
+  const player = storage.getPlayer(userId);
+  if (!player) return noPlayer();
+
+  const feed = player.lastSocialFeed || generateSocialFeed(player, {
+    playerGoals: player.seasonStats.goals,
+    playerAssists: player.seasonStats.assists,
+    rating: 7.2,
+    result: 'V',
+    opponent: 'Rival'
+  });
+
+  const embed = new EmbedBuilder()
+    .setColor(0x1da1f2)
+    .setTitle(`📱 Feed Social & Tendencias — @${player.name.replace(/\s+/g, '_').toLowerCase()}`)
+    .setDescription(feed.slice(0, 4000));
+
+  return { ok: true, ephemeral: false, embeds: [embed], components: (!player.retired && player.stage !== 'entretemporada') ? [continueRow(userId)] : [] };
+}
+
+/** 7. Vista de Noticias Dinámicas */
+function newsFeedView(userId) {
+  const player = storage.getPlayer(userId);
+  if (!player) return noPlayer();
+
+  const news = player.lastNewsFeed || generateNewsFeed(player, {
+    matchResult: {
+      playerGoals: player.seasonStats.goals,
+      playerAssists: player.seasonStats.assists,
+      rating: 7.2,
+      result: 'V',
+      opponent: 'Rival'
+    }
+  });
+
+  const embed = new EmbedBuilder()
+    .setColor(0xc0392b)
+    .setTitle(`📰 Diario Deportivo — Última Edición`)
+    .setDescription(news.slice(0, 4000));
+
+  return { ok: true, ephemeral: false, embeds: [embed], components: (!player.retired && player.stage !== 'entretemporada') ? [continueRow(userId)] : [] };
+}
+
+/** 8. Vista de Cantera y Jóvenes Promesas */
+function academyView(userId) {
+  const player = storage.getPlayer(userId);
+  if (!player) return noPlayer();
+
+  const academy = getClubAcademy(player.club);
+  const embed = new EmbedBuilder()
+    .setColor(0x16a085)
+    .setTitle(`🌱 Academia de Juveniles — ${player.club}`)
+    .setDescription(
+      `Las divisiones inferiores de **${player.club}** preparan a la próxima camada de cracks procedimentales:\n\n` +
+      academy.prospects.map((p, i) =>
+        `\`#${i + 1}\` 🌟 **${p.name}** (${p.position}) — Media: **${p.overall}** | Potencial: **${p.potential}** | ${p.age} años\n` +
+        `└ 🏷️ *${p.trait}* | Valor: ${formatMoney(p.marketValue)} | Scout: *"${p.scoutReport}"*`
+      ).join('\n\n')
+    );
+
+  return { ok: true, ephemeral: false, embeds: [embed], components: (!player.retired && player.stage !== 'entretemporada') ? [continueRow(userId)] : [] };
+}
+
+/** 9. Vista de Ranking Mundial */
+function worldRankingView(userId, category = 'overall') {
+  let list = [];
+  let title = '🌍 Ranking Mundial de Jugadores';
+
+  if (category === 'value') {
+    list = getTopMarketValue(10);
+    title = '💰 Top 10 Jugadores Más Valiosos del Mundo';
+  } else if (category === 'wonderkids') {
+    list = getTopWonderkids(10);
+    title = '👶 Top 10 Jóvenes Promesas Mundiales (Sub-21)';
+  } else if (category === 'chile') {
+    list = getTopByCountry('Chile', 10);
+    title = '🇨🇱 Top 10 Mejores Jugadores Chilenos';
+  } else {
+    list = getTopOverall(10);
+    title = '👑 Top 10 Mejores Jugadores por Media (OVR)';
+  }
+
+  const lines = list.map((p, i) => {
+    const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `\`#${i + 1}\``;
+    return `${medal} **${p.name}** (${p.position}) — **${p.overall} OVR** (Pot: ${p.potential}) | 🏟️ ${p.club} | 💰 ${formatMoney(p.value)}`;
+  }).join('\n');
+
+  const embed = new EmbedBuilder()
+    .setColor(0xf39c12)
+    .setTitle(title)
+    .setDescription(lines);
+
+  return { ok: true, ephemeral: false, embeds: [embed] };
+}
+
+/** 10. Vista del Salón de la Fama */
+function hallOfFameView(userId) {
+  const text = formatHallOfFameEmbed(12);
+  const embed = new EmbedBuilder()
+    .setColor(0xf1c40f)
+    .setTitle('🏛️ Salón de la Fama Permanente — Leyendas Inmortales')
+    .setDescription(text);
+
+  return { ok: true, ephemeral: false, embeds: [embed] };
 }
 
 function attributesView(userId) {
@@ -2212,5 +2571,17 @@ module.exports = {
   dtOffersView,
   dtPanelView,
   dtRetireAction,
-  dtAcceptOfferAction
+  dtAcceptOfferAction,
+  // 15 Deep Systems
+  injuryView,
+  injuryTreatAction,
+  economyView,
+  reputationView,
+  timelineView,
+  nationalTeamView,
+  socialFeedView,
+  newsFeedView,
+  academyView,
+  worldRankingView,
+  hallOfFameView
 };
