@@ -140,6 +140,38 @@ async function startBot() {
             result = engine.dtAcceptOfferAction(interaction.user.id, rest[0]);
           } else if (action === 'dt_retirar') {
             result = engine.dtRetireAction(interaction.user.id);
+          } else if (action === 'treat') {
+            result = engine.injuryTreatAction(interaction.user.id, rest[0]);
+          } else if (action === 'economia') {
+            result = engine.economyView(interaction.user.id);
+            result.ephemeral = true;
+          } else if (action === 'lesion') {
+            result = engine.injuryView(interaction.user.id);
+            result.ephemeral = true;
+          } else if (action === 'reputacion') {
+            result = engine.reputationView(interaction.user.id);
+            result.ephemeral = true;
+          } else if (action === 'historial') {
+            result = engine.timelineView(interaction.user.id);
+            result.ephemeral = true;
+          } else if (action === 'seleccion') {
+            result = engine.nationalTeamView(interaction.user.id);
+            result.ephemeral = true;
+          } else if (action === 'redes') {
+            result = engine.socialFeedView(interaction.user.id);
+            result.ephemeral = true;
+          } else if (action === 'noticias') {
+            result = engine.newsFeedView(interaction.user.id);
+            result.ephemeral = true;
+          } else if (action === 'cantera') {
+            result = engine.academyView(interaction.user.id);
+            result.ephemeral = true;
+          } else if (action === 'ranking') {
+            result = engine.worldRankingView(interaction.user.id, rest[0] || 'overall');
+            result.ephemeral = true;
+          } else if (action === 'salon') {
+            result = engine.hallOfFameView(interaction.user.id);
+            result.ephemeral = true;
           } else {
             return;
           }
