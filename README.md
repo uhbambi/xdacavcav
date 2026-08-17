@@ -17,6 +17,14 @@ Toda la carrera se juega con **botones** — después de crear tu jugador casi n
 | `/atributos` | Tus atributos tipo FIFA (ritmo, tiro, pase, regate, defensa, físico) |
 | `/transferir` | En el mercado de pases: revisa ofertas y elige club |
 | `/vitrina` | Tu vitrina de trofeos: títulos colectivos y premios individuales |
+| `/estadio` | Estadio de tu club (capacidad, asistencia, ambiente, taquilla, remodelaciones) |
+| `/hinchada` | Relación con la hinchada (ídolo, amado, cuestionado o silbado) |
+| `/dna` | ADN futbolístico (clutch, presión, regularidad, liderazgo…) |
+| `/objetivos` | Objetivos personales de temporada y su progreso |
+| `/records` | Récords históricos mundiales del servidor y del universo |
+| `/goat` | Ranking GOAT: índice histórico de los mejores de todos los tiempos |
+| `/mercado` | Mercado de fichajes global (traspasos, rumores, agentes libres) |
+| `/promesas` | Generación de promesas y wonderkids del mundo NPC |
 | `/retirar` | Termina tu carrera y recibe el veredicto final |
 | `/ayuda` | Resumen de cómo jugar |
 

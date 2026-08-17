@@ -9,6 +9,9 @@ const { normalizePersonality } = require('./personality.js');
 const { updateDynamicPotential } = require('./dynamicPotential.js');
 const { evaluateSeasonAwards } = require('./awards.js');
 const { recordSeasonInTimeline } = require('./careerTimeline.js');
+const { normalizeDNA } = require('./dna.js');
+const { normalizeFanRelation } = require('./fans.js');
+const { generatePersonalObjectives } = require('./personalObjectives.js');
 
 /** Club de inicio: siempre uno chico de la division mas baja disponible de tu pais */
 function startingClub(countryKey) {
@@ -156,6 +159,11 @@ function newPlayer({ name, position, nationalityLeagueKey }) {
   normalizePersonality(initialPlayer);
   normalizeReputationStats(initialPlayer);
   normalizeEconomy(initialPlayer);
+  normalizeDNA(initialPlayer);
+  normalizeFanRelation(initialPlayer);
+
+  const initialLeague = getLeague(initialPlayer.leagueKey);
+  initialPlayer.personalObjectives = generatePersonalObjectives(initialPlayer, initialLeague);
 
   const { annualWage, weeklyWage } = calculateWages(initialPlayer);
   initialPlayer.salary = annualWage;
@@ -240,6 +248,12 @@ function normalizePlayer(player) {
   normalizePersonality(player);
   normalizeReputationStats(player);
   normalizeEconomy(player);
+  normalizeDNA(player);
+  normalizeFanRelation(player);
+
+  if (!Array.isArray(player.personalObjectives) || !player.personalObjectives.length) {
+    player.personalObjectives = generatePersonalObjectives(player);
+  }
 
   if (typeof player.bank !== 'number') player.bank = 60000;
   if (typeof player.salary !== 'number') player.salary = calculateSalary(player);

@@ -33,6 +33,14 @@ module.exports = {
         '• `/tienda` — 🛒 Compra mansiones, fisios VIP, chefs, superagentes e inmuebles.\n' +
         '• `/premios` — 🏅 Balón de Oro, The Best, Golden Boy, Trofeo Yashin, Botas de Oro.\n' +
         '• `/vitrina` — 🏆 Tu vitrina de trofeos: títulos colectivos y premios individuales.\n' +
+        '• `/estadio` — 🏟️ Estadio de tu club: capacidad, asistencia, ambiente, taquilla y remodelaciones.\n' +
+        '• `/hinchada` — ❤️ Relación con la hinchada (ídolo, amado, cuestionado o silbado).\n' +
+        '• `/dna` — 🧬 ADN futbolístico: clutch, presión, regularidad, liderazgo y más.\n' +
+        '• `/objetivos` — 🎯 Objetivos personales de temporada (goles, rating, clasificación).\n' +
+        '• `/records` — 🌎 Récords históricos mundiales (goles, asistencias, títulos, OVR, longevidad).\n' +
+        '• `/goat` — 🐐 Ranking GOAT: índice histórico de los mejores de todos los tiempos.\n' +
+        '• `/mercado` — 🗞️ Mercado de fichajes global: traspasos, rumores, libres y top NPC.\n' +
+        '• `/promesas` — 👶 Generación de promesas y wonderkids del mundo NPC.\n' +
         '• `/votar-ballon-dor` — 🗳️ Gala comunitaria de votación del Balón de Oro.\n' +
         '• `/clasicos` / `/rivalidades` — ⚔️ Clásicos históricos y duelos directos con otros jugadores.\n\n' +
         '**👔 MODO DIRECTOR TÉCNICO (DT):**\n' +
