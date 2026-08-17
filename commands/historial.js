@@ -10,6 +10,16 @@ module.exports = {
 
   async execute(interaction) {
     const view = engine.timelineView(interaction.user.id);
-    await interaction.reply({ content: view.content, embeds: view.embeds, components: view.components, ephemeral: view.ephemeral });
+    const payload = {
+      content: view.content || undefined,
+      embeds: view.embeds || [],
+      components: view.components || [],
+      ephemeral: Boolean(view.ephemeral)
+    };
+    if (interaction.replied || interaction.deferred) {
+      await interaction.followUp(payload);
+    } else {
+      await interaction.reply(payload);
+    }
   }
 };
