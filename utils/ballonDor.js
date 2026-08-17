@@ -17,9 +17,11 @@ function getEligibleCandidates(players, season) {
   });
 }
 
-function initializeBallonDOrVote(season, candidates) {
+function initializeBallonDOrVote(season, candidates, creator = {}) {
   return {
     season,
+    creatorId: creator.id || null,
+    creatorName: creator.name || 'Organizador',
     candidates: candidates.slice(0, 10).map(c => ({
       playerId: c.userId || c.id,
       name: c.name,
@@ -32,7 +34,8 @@ function initializeBallonDOrVote(season, candidates) {
       bronze: 0
     })),
     votes: {},
-    status: 'open'
+    status: 'open',
+    openedAt: Date.now()
   };
 }
 
