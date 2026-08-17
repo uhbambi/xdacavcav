@@ -134,6 +134,26 @@ async function startBot() {
           } else if (action === 'dt_panel') {
             result = engine.dtPanelView(interaction.user.id);
             result.ephemeral = true;
+          } else if (action === 'dt_plantilla') {
+            result = engine.dtSquadView(interaction.user.id);
+            result.ephemeral = true;
+          } else if (action === 'dt_alinear') {
+            result = engine.dtAutoLineupAction(interaction.user.id);
+          } else if (action === 'dt_tactica') {
+            result = engine.dtTacticView(interaction.user.id);
+            result.ephemeral = true;
+          } else if (action === 'dt_charla') {
+            result = engine.dtTeamTalkView(interaction.user.id);
+            result.ephemeral = true;
+          } else if (action === 'dt_fichar') {
+            result = engine.dtTransfersView(interaction.user.id);
+            result.ephemeral = true;
+          } else if (action === 'dt_cantera') {
+            result = engine.dtYouthAcademyView(interaction.user.id);
+            result.ephemeral = true;
+          } else if (action === 'dt_copas') {
+            result = engine.dtCupsView(interaction.user.id);
+            result.ephemeral = true;
           } else if (action === 'dt_ofertas') {
             result = engine.dtOffersView(interaction.user.id);
           } else if (action === 'dt_accept') {
