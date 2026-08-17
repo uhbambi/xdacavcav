@@ -67,6 +67,7 @@ function getFIFARanking() {
   return sorted.map((n, index) => ({
     rank: index + 1,
     name: n.name,
+    nation: n.name,
     flag: nationFlag(n.name),
     confed: n.confed,
     points: Math.round(n.media * 21.5 + (40 - index) * 3)
@@ -83,7 +84,6 @@ function evaluateCallUp(player) {
   const stats = player.seasonStats || {};
   const avg = stats.apps > 0 ? stats.avgRatingSum / stats.apps : 6.5;
 
-  // Si está lesionado no es convocado
   if (player.injuredMatches > 0) {
     return { called: false, reason: 'Baja por lesión médica' };
   }
@@ -99,12 +99,29 @@ function evaluateCallUp(player) {
 
   return {
     called: false,
-    reason: `Tu media (${player.overall}) aún no alcanza el nivel exigido por ${nation.name} (media corte ~${minOvr}).`
+    reason: `Tu media (${player.overall}) aún no alcanza el nivel exigido por ${nation.name} (corte aprox: ~${minOvr}).`
+  };
+}
+
+/**
+ * Obtiene el estado consolidado de la selección para el jugador
+ */
+function getNationalTeamStatus(player) {
+  const callUp = evaluateCallUp(player);
+  const hierarchy = getNationalHierarchy(player);
+  return {
+    eligible: callUp.called,
+    status: hierarchy.label,
+    tier: hierarchy.tier,
+    desc: hierarchy.description,
+    reason: callUp.reason
   };
 }
 
 module.exports = {
   getNationalHierarchy,
   getFIFARanking,
-  evaluateCallUp
+  getFIFARankings: getFIFARanking,
+  evaluateCallUp,
+  getNationalTeamStatus
 };
