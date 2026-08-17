@@ -1,0 +1,11 @@
+# Dependencias
+node_modules/
+
+# Guardados locales del bot (datos de jugadores/DTs; no se versionan)
+data/players.json
+data/managers.json
+data/ballondor.json
+data/records.json
+
+# Entorno
+.env
