@@ -2,7 +2,13 @@
 
 const fs = require('fs');
 const path = require('path');
-const { Pool } = require('pg');
+// Carga opcional y segura del cliente PostgreSQL
+let pgModule = null;
+try {
+  pgModule = require('pg');
+} catch (e) {
+  // pg no está instalado o no se encuentra en el entorno actual
+}
 
 const DB_PATH = path.join(__dirname, 'players.json');
 const MANAGERS_PATH = path.join(__dirname, 'managers.json');
@@ -62,7 +68,14 @@ async function initDatabase() {
     return;
   }
 
+  if (!pgModule || !pgModule.Pool) {
+    console.log('[Storage] ⚠️ DATABASE_URL está definido pero el módulo "pg" no está instalado. Para activar PostgreSQL en Railway ejecuta "npm install pg". Utilizando almacenamiento local persistente (JSON).');
+    isInitialized = true;
+    return;
+  }
+
   try {
+    const { Pool } = pgModule;
     const useSsl = dbUrl.includes('supabase') || dbUrl.includes('railway') || dbUrl.includes('neon') || process.env.NODE_ENV === 'production';
     pgPool = new Pool({
       connectionString: dbUrl,
