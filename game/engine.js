@@ -25,7 +25,10 @@ const { checkRetirementAge, setupRetirementCeremony, applyRetirementCeremonyBonu
 const {
   newManager, transitionPlayerToManager, simulateDTMatch, calculateTeamChemistryAndRating,
   generatePressConference, ensureDTFixture, advanceDTLeague, dtTableSorted,
-  generateManagerOffers, acceptManagerJobOffer, getManagerRetirementVerdict, retireManager, simulateEntireDTSeason
+  generateManagerOffers, acceptManagerJobOffer, getManagerRetirementVerdict, retireManager, simulateEntireDTSeason,
+  FORMATIONS, TACTICAL_STYLES, CHARLAS_VESTUARIO,
+  autoLineupSquad, changeManagerTactic, deliverTeamTalk,
+  getTransferMarketForManager, signPlayerForManager, promoteYouthForManager
 } = require('../utils/manager.js');
 
 // 15 Deep Simulation Systems
@@ -621,6 +624,11 @@ function resolveMinigameChoice(userId, choiceIndex) {
   const outcome = resolveMinigame(player, pending, choiceIndex);
   player.pendingMinigame = null;
   player.morale = Math.max(10, Math.min(100, player.morale + outcome.moraleDelta));
+
+  if (outcome.reward === 'gol') {
+    player.seasonBestGoal = outcome.text || 'Golazo acrobático al ángulo';
+    player.puskasNominated = true;
+  }
 
   return playPendingMatch(userId, player, {
     bonusGoals: outcome.reward === 'gol' ? 1 : 0,
@@ -1451,7 +1459,18 @@ function reputationView(userId) {
 /** 4. Vista de Timeline e Historial Completo */
 function timelineView(userId) {
   const player = storage.getPlayer(userId);
-  if (!player) return noPlayer();
+  if (!player) {
+    const manager = storage.getManager(userId);
+    if (manager) {
+      const timelineText = formatCareerTimeline(manager);
+      const embed = new EmbedBuilder()
+        .setColor(0x34495e)
+        .setTitle(`📜 Historial de Gestión Técnica — DT ${manager.name}`)
+        .setDescription(timelineText.slice(0, 4000));
+      return { ok: true, ephemeral: false, embeds: [embed], components: [dtContinueRow(userId, manager)] };
+    }
+    return noPlayer();
+  }
 
   const timelineText = formatCareerTimeline(player);
   const embed = new EmbedBuilder()
@@ -2087,6 +2106,10 @@ function simulateEntireSeason(userId) {
     }
 
     while (player.nationalCup && player.nationalCup.phase !== 'eliminado' && player.nationalCup.phase !== 'campeon') {
+      if (isFinal(player.nationalCup)) {
+        storage.setPlayer(userId, player);
+        return promptForFinal(userId, player, player.nationalCup);
+      }
       const opp = nextOpponent(player.nationalCup);
       if (!opp) break;
       const res = simulateMatch(player, club, opp, 'equilibrado', {});
@@ -2124,6 +2147,10 @@ function simulateEntireSeason(userId) {
     }
 
     while (player.cup && player.cup.phase !== 'eliminado' && player.cup.phase !== 'campeon') {
+      if (isFinal(player.cup)) {
+        storage.setPlayer(userId, player);
+        return promptForFinal(userId, player, player.cup);
+      }
       const opp = nextOpponent(player.cup);
       if (!opp) break;
       const res = simulateMatch(player, club, opp, 'equilibrado', {});
@@ -2165,6 +2192,10 @@ function simulateEntireSeason(userId) {
     if (player.stage === 'mundial' && player.worldCup) {
       const nationObj = findNation(player.nationality) || { media: 75 };
       while (player.worldCup && player.worldCup.phase !== 'eliminado' && player.worldCup.phase !== 'campeon') {
+        if (isFinal(player.worldCup)) {
+          storage.setPlayer(userId, player);
+          return promptForFinal(userId, player, player.worldCup);
+        }
         const opp = nextOpponent(player.worldCup);
         if (!opp) break;
         const res = simulateMatch(player, { name: player.worldCup.myTeam, media: nationObj.media, tier: 5 }, opp, 'equilibrado', {});
@@ -2186,6 +2217,10 @@ function simulateEntireSeason(userId) {
     } else if (player.stage === 'copa_seleccion' && player.continentalNationalCup) {
       const nationObj = findNation(player.nationality) || { media: 75 };
       while (player.continentalNationalCup && player.continentalNationalCup.phase !== 'eliminado' && player.continentalNationalCup.phase !== 'campeon') {
+        if (isFinal(player.continentalNationalCup)) {
+          storage.setPlayer(userId, player);
+          return promptForFinal(userId, player, player.continentalNationalCup);
+        }
         const opp = nextOpponent(player.continentalNationalCup);
         if (!opp) break;
         const res = simulateMatch(player, { name: player.continentalNationalCup.myTeam, media: nationObj.media, tier: 5 }, opp, 'equilibrado', {});
@@ -2290,6 +2325,37 @@ function simulateEntireSeason(userId) {
 
 // ─────────────────────────────── MODO DIRECTOR TÉCNICO (DT) ───────────────────────────────
 
+function promptForDTFinal(userId, manager, tournament) {
+  storage.setManager(userId, manager);
+  const opp = nextOpponent(tournament);
+  const oppName = opp ? opp.name : (tournament.knockoutOpponent || 'Rival');
+  const embed = new EmbedBuilder()
+    .setColor(0xf1c40f)
+    .setTitle(`🏆 ¡GRAN FINAL DT: ${tournament.name.toUpperCase()}!`)
+    .setDescription(
+      `👔 **¡El club de ${manager.name} ha clasificado a la Gran Final!**\n\n` +
+      `⚔️ **${manager.club} vs ${oppName}**\n` +
+      `🏟️ **${tournament.name} · PARTIDO POR EL TÍTULO**\n\n` +
+      `Toda la directiva y la hinchada esperan tus órdenes desde el banquillo.\n` +
+      `¿Deseas dirigir este partido paso a paso o simularlo directamente?`
+    )
+    .setFooter({ text: 'Toca "Dirigir la Final" para jugar el partido definitorio.' });
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`dt_sim:${userId}`).setLabel('🎮 Dirigir la Final').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`dt_fastseason:${userId}`).setLabel('⏩ Simular Resultado').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`dt_plantilla:${userId}`).setLabel('👥 Plantilla').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`dt_panel:${userId}`).setLabel('👔 Panel DT').setStyle(ButtonStyle.Secondary)
+  );
+
+  return {
+    ok: true,
+    ephemeral: false,
+    embeds: [embed],
+    components: [row]
+  };
+}
+
 function dtSimulateStep(userId) {
   const manager = storage.getManager(userId);
   if (!manager) {
@@ -2299,45 +2365,182 @@ function dtSimulateStep(userId) {
     return { ok: false, ephemeral: true, content: `Esta carrera de DT con **${manager.name}** ya ha finalizado por retiro. Usa \`/dt crear\` para iniciar una nueva carrera.` };
   }
 
-  // Si ya terminó la temporada anterior y presiona seguir, avanzar a la siguiente
-  if (manager.matchdayIndex >= (manager.matchdayTotal || 16)) {
+  // 1. Si está en entretemporada, avanzar a la siguiente
+  if (manager.stage === 'entretemporada' || manager.matchdayIndex >= (manager.matchdayTotal || 16)) {
     advanceDTLeague(manager);
+    manager.stage = 'liga';
+    storage.setManager(userId, manager);
   }
 
+  // 2. Si está en fase de Liga
+  if (!manager.stage || manager.stage === 'liga') {
+    manager.stage = 'liga';
+    const opponent = ensureDTFixture(manager);
+    const matchSim = simulateDTMatch(manager, opponent);
+    storage.setManager(userId, manager);
+
+    const classicText = matchSim.classicData && matchSim.classicData.isClassic
+      ? `🔥 **¡CLÁSICO HISTÓRICO: ${matchSim.classicData.name}!**\n*${matchSim.classicData.desc}*\n\n`
+      : '';
+
+    const leagueText = matchSim.leagueUpdate
+      ? `\n\n📍 **Liga:** Fecha ${matchSim.leagueUpdate.matchdayIndex}/${matchSim.leagueUpdate.matchdayTotal} · Posición actual: **#${matchSim.leagueUpdate.position}**`
+      : '';
+
+    // Si terminó la liga, pasar a Copa Nacional
+    if (matchSim.leagueUpdate?.seasonEnded) {
+      const table = dtTableSorted(manager.table || []);
+      const pos = table.findIndex(t => t.club === manager.club) + 1;
+      const qual = getContinentalQualification(manager.leagueKey, pos);
+      manager.qualifiedContinentalCup = qual;
+      manager.stage = 'copa_nacional';
+      manager.nationalCup = createNationalCup({ club: manager.club, leagueKey: manager.leagueKey });
+      storage.setManager(userId, manager);
+    }
+
+    const embed = new EmbedBuilder()
+      .setColor(matchSim.result === 'V' ? 0x2ecc71 : matchSim.result === 'E' ? 0xf1c40f : 0xe74c3c)
+      .setTitle(`⚽ ${manager.club} ${matchSim.myGoals} - ${matchSim.oppGoals} ${matchSim.opponentName}`)
+      .setDescription(
+        classicText +
+        `Resultado: **${matchSim.result === 'V' ? '¡VICTORIA!' : matchSim.result === 'E' ? 'EMPATE' : 'DERROTA'}**\n\n` +
+        `📋 **Crónica de Jugadas Clave:**\n` +
+        matchSim.events.map(e => `• **${e.minute}'** ${e.title}\n  ${e.desc}`).join('\n\n') +
+        leagueText +
+        (manager.stage === 'copa_nacional' ? `\n\n🏆 **¡Finalizó la fase de Liga!** Ahora tu equipo disputará la **${manager.nationalCup?.name || 'Copa Nacional'}**.` : '') +
+        `\n\n📊 **Confianza Directiva:** ${manager.boardConfidence}% | **Hinchada:** ${manager.fanConfidence}%`
+      )
+      .setFooter({ text: 'Toca "Siguiente partido" para continuar el calendario oficial' });
+
+    return {
+      ok: true,
+      ephemeral: false,
+      embeds: [embed],
+      components: [dtContinueRow(userId, manager)]
+    };
+  }
+
+  // 3. Si está en fase de Copa Nacional
+  if (manager.stage === 'copa_nacional' && manager.nationalCup) {
+    const opp = nextOpponent(manager.nationalCup);
+    if (!opp) {
+      if (manager.qualifiedContinentalCup) {
+        manager.stage = 'copa';
+        manager.cup = createContinentalCup({ club: manager.club, leagueKey: manager.leagueKey }, manager.qualifiedContinentalCup);
+        manager.qualifiedContinentalCup = null;
+      } else {
+        manager.stage = 'entretemporada';
+      }
+      storage.setManager(userId, manager);
+      return dtSimulateStep(userId);
+    }
+
+    const matchSim = simulateDTMatch(manager, opp.name);
+    if (matchSim.myGoals === matchSim.oppGoals) {
+      if (Math.random() < 0.52) matchSim.myGoals += 1;
+      else matchSim.oppGoals += 1;
+    }
+
+    const outcome = applyTournamentResult(manager.nationalCup, matchSim.myGoals, matchSim.oppGoals);
+    if (outcome.status === 'campeon') {
+      manager.trophies.push(`Campeón ${manager.nationalCup.name} (Temporada ${manager.season})`);
+      manager.boardConfidence = Math.min(100, manager.boardConfidence + 15);
+      manager.fanConfidence = Math.min(100, manager.fanConfidence + 18);
+    }
+
+    const cupFinished = outcome.status === 'campeon' || outcome.status === 'eliminado';
+    if (cupFinished) {
+      manager.nationalCup = null;
+      if (manager.qualifiedContinentalCup) {
+        manager.stage = 'copa';
+        manager.cup = createContinentalCup({ club: manager.club, leagueKey: manager.leagueKey }, manager.qualifiedContinentalCup);
+        manager.qualifiedContinentalCup = null;
+      } else {
+        manager.stage = 'entretemporada';
+        manager.jobOffers = generateManagerOffers(manager);
+      }
+    }
+
+    storage.setManager(userId, manager);
+
+    const embed = new EmbedBuilder()
+      .setColor(matchSim.result === 'V' ? 0x2ecc71 : 0xe74c3c)
+      .setTitle(`🏆 ${manager.club} ${matchSim.myGoals} - ${matchSim.oppGoals} ${opp.name}`)
+      .setDescription(
+        `🏆 **Copa Nacional · ${phaseLabel(manager.nationalCup || { phase: outcome.status })}**\n\n` +
+        (outcome.text ? `${outcome.text}\n\n` : '') +
+        `📋 **Crónica:**\n` +
+        matchSim.events.map(e => `• **${e.minute}'** ${e.title}\n  ${e.desc}`).join('\n\n')
+      );
+
+    return {
+      ok: true,
+      ephemeral: false,
+      embeds: [embed],
+      components: [dtContinueRow(userId, manager)]
+    };
+  }
+
+  // 4. Si está en fase de Copa Continental (Libertadores, Champions, Sudamericana, etc.)
+  if (manager.stage === 'copa' && manager.cup) {
+    const opp = nextOpponent(manager.cup);
+    if (!opp) {
+      manager.cup = null;
+      manager.stage = 'entretemporada';
+      manager.jobOffers = generateManagerOffers(manager);
+      storage.setManager(userId, manager);
+      return dtSimulateStep(userId);
+    }
+
+    const matchSim = simulateDTMatch(manager, opp.name);
+    if (matchSim.myGoals === matchSim.oppGoals && KNOCKOUT_ORDER.includes(manager.cup.phase)) {
+      if (Math.random() < 0.50) matchSim.myGoals += 1;
+      else matchSim.oppGoals += 1;
+    }
+
+    const outcome = applyTournamentResult(manager.cup, matchSim.myGoals, matchSim.oppGoals);
+    if (outcome.status === 'campeon') {
+      manager.trophies.push(`Campeón ${manager.cup.name} (Temporada ${manager.season})`);
+      manager.boardConfidence = Math.min(100, manager.boardConfidence + 25);
+      manager.fanConfidence = Math.min(100, manager.fanConfidence + 25);
+      manager.budget += 15000000;
+    }
+
+    const cupFinished = outcome.status === 'campeon' || outcome.status === 'eliminado';
+    if (cupFinished) {
+      manager.cup = null;
+      manager.stage = 'entretemporada';
+      manager.jobOffers = generateManagerOffers(manager);
+    }
+
+    storage.setManager(userId, manager);
+
+    const embed = new EmbedBuilder()
+      .setColor(matchSim.result === 'V' ? 0x2ecc71 : 0xe74c3c)
+      .setTitle(`🌎 ${manager.club} ${matchSim.myGoals} - ${matchSim.oppGoals} ${opp.name}`)
+      .setDescription(
+        `🌎 **${manager.cup ? manager.cup.name : 'Copa Continental'} · ${phaseLabel(manager.cup || { phase: outcome.status })}**\n\n` +
+        (outcome.text ? `${outcome.text}\n\n` : '') +
+        `📋 **Crónica:**\n` +
+        matchSim.events.map(e => `• **${e.minute}'** ${e.title}\n  ${e.desc}`).join('\n\n')
+      );
+
+    return {
+      ok: true,
+      ephemeral: false,
+      embeds: [embed],
+      components: [dtContinueRow(userId, manager)]
+    };
+  }
+
+  // Fallback a simulación de partido
   const opponent = ensureDTFixture(manager);
   const matchSim = simulateDTMatch(manager, opponent);
   storage.setManager(userId, manager);
-
-  const classicText = matchSim.classicData && matchSim.classicData.isClassic
-    ? `🔥 **¡CLÁSICO HISTÓRICO: ${matchSim.classicData.name}!**\n*${matchSim.classicData.desc}*\n\n`
-    : '';
-
-  const leagueText = matchSim.leagueUpdate
-    ? `\n\n📍 **Liga:** Fecha ${matchSim.leagueUpdate.matchdayIndex}/${matchSim.leagueUpdate.matchdayTotal} · Posición actual: **#${matchSim.leagueUpdate.position}**`
-    : '';
-
-  const seasonWrap = matchSim.leagueUpdate?.seasonEnded
-    ? `\n\n🏁 **¡FINALIZÓ LA TEMPORADA!** ${matchSim.leagueUpdate.seasonTrophy ? `\n${matchSim.leagueUpdate.seasonTrophy}` : ''}\n💼 Tienes **${matchSim.leagueUpdate.offersCount} nuevas ofertas de clubes**. Usa los botones de abajo para verlas.`
-    : '';
-
-  const embed = new EmbedBuilder()
-    .setColor(matchSim.result === 'V' ? 0x2ecc71 : matchSim.result === 'E' ? 0xf1c40f : 0xe74c3c)
-    .setTitle(`⚽ ${manager.club} ${matchSim.myGoals} - ${matchSim.oppGoals} ${matchSim.opponentName}`)
-    .setDescription(
-      classicText +
-      `Resultado: **${matchSim.result === 'V' ? '¡VICTORIA!' : matchSim.result === 'E' ? 'EMPATE' : 'DERROTA'}**\n\n` +
-      `📋 **Crónica de Jugadas Clave:**\n` +
-      matchSim.events.map(e => `• **${e.minute}'** ${e.title}\n  ${e.desc}`).join('\n\n') +
-      leagueText +
-      seasonWrap +
-      `\n\n📊 **Confianza Directiva:** ${manager.boardConfidence}% | **Hinchada:** ${manager.fanConfidence}%`
-    )
-    .setFooter({ text: 'Toca "Siguiente partido" para continuar el calendario oficial' });
-
   return {
     ok: true,
     ephemeral: false,
-    embeds: [embed],
+    embeds: [new EmbedBuilder().setTitle(`⚽ Partido DT`).setDescription(`${manager.club} ${matchSim.myGoals} - ${matchSim.oppGoals} ${matchSim.opponentName}`)],
     components: [dtContinueRow(userId, manager)]
   };
 }
@@ -2351,27 +2554,119 @@ function dtSimulateEntireSeason(userId) {
     return { ok: false, ephemeral: true, content: `Esta carrera de DT con **${manager.name}** ya ha finalizado por retiro.` };
   }
 
-  // Si ya estaba en final de temporada, avanzamos de temporada primero
-  if (manager.matchdayIndex >= (manager.matchdayTotal || 16)) {
+  // Si ya estaba en entretemporada, avanzamos a la siguiente
+  if (manager.stage === 'entretemporada' || manager.matchdayIndex >= (manager.matchdayTotal || 16)) {
     advanceDTLeague(manager);
+    manager.stage = 'liga';
+    storage.setManager(userId, manager);
   }
 
-  const seasonRes = simulateEntireDTSeason(manager);
+  // 1. Simular Liga
+  if (!manager.stage || manager.stage === 'liga') {
+    ensureDTFixture(manager);
+    while (manager.matchdayIndex < (manager.matchdayTotal || 16)) {
+      const opp = manager.fixture[manager.matchdayIndex];
+      simulateDTMatch(manager, opp);
+    }
+
+    const table = dtTableSorted(manager.table || []);
+    const pos = table.findIndex(t => t.club === manager.club) + 1;
+    const isChamp = pos === 1;
+    if (isChamp) {
+      manager.trophies.push(`Campeón ${manager.leagueName} (Temporada ${manager.season})`);
+    }
+
+    const qual = getContinentalQualification(manager.leagueKey, pos);
+    manager.qualifiedContinentalCup = qual;
+    manager.stage = 'copa_nacional';
+    manager.nationalCup = createNationalCup({ club: manager.club, leagueKey: manager.leagueKey });
+    storage.setManager(userId, manager);
+  }
+
+  // 2. Simular Copa Nacional
+  if (manager.stage === 'copa_nacional' && manager.nationalCup) {
+    while (manager.nationalCup && manager.nationalCup.phase !== 'eliminado' && manager.nationalCup.phase !== 'campeon') {
+      if (isFinal(manager.nationalCup)) {
+        storage.setManager(userId, manager);
+        return promptForDTFinal(userId, manager, manager.nationalCup);
+      }
+      const opp = nextOpponent(manager.nationalCup);
+      if (!opp) break;
+      const res = simulateDTMatch(manager, opp.name);
+      if (res.myGoals === res.oppGoals) {
+        if (Math.random() < 0.52) res.myGoals += 1;
+        else res.oppGoals += 1;
+      }
+      const out = applyTournamentResult(manager.nationalCup, res.myGoals, res.oppGoals);
+      if (out.status === 'campeon') {
+        manager.trophies.push(`Campeón ${manager.nationalCup.name} (Temporada ${manager.season})`);
+        break;
+      } else if (out.status === 'eliminado') {
+        break;
+      }
+    }
+
+    manager.nationalCup = null;
+    if (manager.qualifiedContinentalCup) {
+      manager.stage = 'copa';
+      manager.cup = createContinentalCup({ club: manager.club, leagueKey: manager.leagueKey }, manager.qualifiedContinentalCup);
+      manager.qualifiedContinentalCup = null;
+    } else {
+      manager.stage = 'entretemporada';
+    }
+    storage.setManager(userId, manager);
+  }
+
+  // 3. Simular Copa Continental (Copa Libertadores, Champions, Sudamericana, etc.)
+  if (manager.stage === 'copa' && manager.cup) {
+    while (manager.cup && manager.cup.phase !== 'eliminado' && manager.cup.phase !== 'campeon') {
+      if (isFinal(manager.cup)) {
+        storage.setManager(userId, manager);
+        return promptForDTFinal(userId, manager, manager.cup);
+      }
+      const opp = nextOpponent(manager.cup);
+      if (!opp) break;
+      const res = simulateDTMatch(manager, opp.name);
+      if (res.myGoals === res.oppGoals && KNOCKOUT_ORDER.includes(manager.cup.phase)) {
+        if (Math.random() < 0.50) res.myGoals += 1;
+        else res.oppGoals += 1;
+      }
+      const out = applyTournamentResult(manager.cup, res.myGoals, res.oppGoals);
+      if (out.status === 'campeon') {
+        manager.trophies.push(`Campeón ${manager.cup.name} (Temporada ${manager.season})`);
+        manager.budget += 15000000;
+        break;
+      } else if (out.status === 'eliminado') {
+        break;
+      }
+    }
+
+    manager.cup = null;
+    manager.stage = 'entretemporada';
+    storage.setManager(userId, manager);
+  }
+
+  // 4. Cierre de temporada DT
+  manager.jobOffers = generateManagerOffers(manager);
   storage.setManager(userId, manager);
 
+  const table = dtTableSorted(manager.table || []);
+  const pos = table.findIndex(t => t.club === manager.club) + 1;
+  const isChampion = pos === 1;
+
   const embed = new EmbedBuilder()
-    .setColor(seasonRes.isChampion ? 0xf1c40f : 0x3498db)
-    .setTitle(`🏆 Resumen de Temporada ${seasonRes.season} · ${manager.club}`)
+    .setColor(isChampion ? 0xf1c40f : 0x3498db)
+    .setTitle(`🏆 Resumen de Temporada ${manager.season} · ${manager.club}`)
     .setDescription(
-      `Has disputado la temporada completa de liga como Director Técnico de **${manager.club}** (${manager.leagueName}).\n\n` +
-      `🏅 **Posición Final:** **#${seasonRes.position}** de ${seasonRes.totalClubs} equipos\n` +
-      (seasonRes.isChampion ? `👑 **¡CAMPEÓN DE LA LIGA!** Se añade un nuevo trofeo a tu palmarés.\n` : '') +
-      `\n📊 **Rendimiento:**\n` +
+      `Has completado la temporada íntegra de competiciones como Director Técnico de **${manager.club}** (${manager.leagueName}).\n\n` +
+      `🏅 **Posición en Liga:** **#${pos}** de ${table.length} equipos\n` +
+      (isChampion ? `👑 **¡CAMPEÓN DE LA LIGA!** Sumas un nuevo trofeo de liga.\n` : '') +
+      `\n📊 **Rendimiento Global:**\n` +
       `• Partidos: **${manager.seasonStats.matches}** (V: ${manager.seasonStats.wins} · E: ${manager.seasonStats.draws} · D: ${manager.seasonStats.losses})\n` +
       `• Puntos: **${manager.seasonStats.points} pts** | DG: **${manager.seasonStats.goalsFor - manager.seasonStats.goalsAgainst}**\n` +
       `• Confianza Directiva: **${manager.boardConfidence}%** | Hinchada: **${manager.fanConfidence}%**\n` +
-      `• Presupuesto actual: **$${manager.budget.toLocaleString('en-US')}**\n` +
-      `\n💼 **Mercado de Contratos:** Tienes **${(seasonRes.offers || []).length} ofertas** de otros clubes para dirigirlos.`
+      `• Presupuesto actual: **${manager.budget.toLocaleString('en-US')}**\n` +
+      `\n💼 **Mercado de Contratos:** Tienes **${(manager.jobOffers || []).length} ofertas** de otros clubes para dirigirlos.`
     )
     .setFooter({ text: 'Revisa las ofertas de clubes o continúa con la próxima temporada' });
 
@@ -2381,6 +2676,227 @@ function dtSimulateEntireSeason(userId) {
     embeds: [embed],
     components: [dtContinueRow(userId, manager)]
   };
+}
+
+function dtSquadView(userId) {
+  const manager = storage.getManager(userId);
+  if (!manager) return { ok: false, ephemeral: true, content: 'No tienes carrera activa como DT.' };
+
+  const squad = manager.squad || [];
+  const xiIds = manager.startingXI || [];
+
+  const starters = xiIds.map(id => squad.find(p => p.id === id)).filter(Boolean);
+  const bench = squad.filter(p => !xiIds.includes(p.id));
+
+  const startersText = starters.map((p, i) =>
+    `\`#${i + 1}\` **${p.name}** (${p.position}) — Media: **${p.overall}** | Moral: ${p.morale}% | Energía: ${p.energy}% | ⚽ ${p.goals} 🅰️ ${p.assists}`
+  ).join('\n');
+
+  const benchText = bench.slice(0, 15).map(p =>
+    `• **${p.name}** (${p.position} ${p.overall}) — Energía: ${p.energy}% | Sueldo: ${(p.wage || 5000).toLocaleString('en-US')}`
+  ).join('\n');
+
+  const embed = new EmbedBuilder()
+    .setColor(0x2980b9)
+    .setTitle(`👥 Plantel Completo · ${manager.club} (${squad.length} Jugadores)`)
+    .setDescription(
+      `Esquema Táctico: **${manager.formation}** (${manager.tacticStyle})\n` +
+      `Presupuesto Salarial: **${manager.budget.toLocaleString('en-US')}**\n\n` +
+      `🟢 **ONCE TITULAR (${starters.length}/11):**\n${startersText || 'Sin titulares definidos'}\n\n` +
+      `🔵 **SUPLENTES & RESERVAS (${bench.length}):**\n${benchText || 'Sin suplentes'}`
+    )
+    .setFooter({ text: 'Usa /dt alinear para que el cuerpo técnico seleccione el mejor 11 según media y condición física.' });
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`dt_alinear:${userId}`).setLabel('⚡ Auto-Alinear Mejor 11').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`dt_panel:${userId}`).setLabel('👔 Panel DT').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`dt_sim:${userId}`).setLabel('▶️ Siguiente Partido').setStyle(ButtonStyle.Primary)
+  );
+
+  return { ok: true, ephemeral: true, embeds: [embed], components: [row] };
+}
+
+function dtAutoLineupAction(userId) {
+  const manager = storage.getManager(userId);
+  if (!manager) return { ok: false, ephemeral: true, content: 'No tienes carrera activa como DT.' };
+
+  const res = autoLineupSquad(manager);
+  storage.setManager(userId, manager);
+
+  const embed = new EmbedBuilder()
+    .setColor(0x2ecc71)
+    .setTitle(`⚡ Once Titular Optimizado · ${manager.club}`)
+    .setDescription(
+      `El cuerpo técnico ha seleccionado a los 11 mejores jugadores en base a su media y energía actual para el esquema **${manager.formation}**.\n\n` +
+      `Media promedio del 11 titular: **${res.avgOvr} OVR**`
+    );
+
+  return { ok: true, ephemeral: false, embeds: [embed], components: [dtContinueRow(userId, manager)] };
+}
+
+function dtTacticView(userId, newFormation, newStyle) {
+  const manager = storage.getManager(userId);
+  if (!manager) return { ok: false, ephemeral: true, content: 'No tienes carrera activa como DT.' };
+
+  if (newFormation || newStyle) {
+    const res = changeManagerTactic(manager, newFormation || manager.formation, newStyle || manager.tacticStyle);
+    storage.setManager(userId, manager);
+    const embed = new EmbedBuilder()
+      .setColor(0x2ecc71)
+      .setTitle(`📋 Táctica Actualizada · ${manager.club}`)
+      .setDescription(
+        `✅ Formación: **${res.formation}**\n` +
+        `✅ Estilo de Juego: **${res.style}** (${TACTICAL_STYLES[res.style]?.label || res.style})\n\n` +
+        `*${TACTICAL_STYLES[res.style]?.desc || ''}*`
+      );
+    return { ok: true, ephemeral: false, embeds: [embed], components: [dtContinueRow(userId, manager)] };
+  }
+
+  const formList = Object.entries(FORMATIONS).map(([k, v]) => `• **${k}**: ${v.def} DEF - ${v.mid} MED - ${v.att} DEL`).join('\n');
+  const styleList = Object.entries(TACTICAL_STYLES).map(([k, v]) => `• **${k}** (${v.label}): ${v.desc}`).join('\n');
+
+  const embed = new EmbedBuilder()
+    .setColor(0x34495e)
+    .setTitle(`📋 Pizarra Táctica & Estrategia · DT ${manager.name}`)
+    .setDescription(
+      `Formación actual: **${manager.formation}** | Estilo: **${TACTICAL_STYLES[manager.tacticStyle]?.label || manager.tacticStyle}**\n\n` +
+      `📐 **Formaciones Disponibles:**\n${formList}\n\n` +
+      `🧠 **Estilos Tácticos:**\n${styleList}\n\n` +
+      `💡 Para cambiar usa: \`/dt tactica [formacion] [estilo]\``
+    );
+
+  return { ok: true, ephemeral: true, embeds: [embed], components: [dtContinueRow(userId, manager)] };
+}
+
+function dtTeamTalkView(userId, talkId) {
+  const manager = storage.getManager(userId);
+  if (!manager) return { ok: false, ephemeral: true, content: 'No tienes carrera activa como DT.' };
+
+  if (talkId) {
+    const res = deliverTeamTalk(manager, talkId);
+    if (!res.ok) return { ok: false, ephemeral: true, content: `❌ ${res.message}` };
+    storage.setManager(userId, manager);
+
+    const embed = new EmbedBuilder()
+      .setColor(0xe67e22)
+      .setTitle(`🗣️ Charla de Vestuario Entregada`)
+      .setDescription(
+        `**DT ${manager.name}:** *"${res.talk.text}"*\n\n` +
+        `💬 **Efecto en el Plantel:**\n` +
+        `• Reacción: ${res.talk.desc}\n` +
+        `• Modificador de Moral: **+${res.talk.moraleBoost}**\n` +
+        `• Foco Táctico: **+${res.talk.focusBoost}%**`
+      );
+    return { ok: true, ephemeral: false, embeds: [embed], components: [dtContinueRow(userId, manager)] };
+  }
+
+  const talksText = Object.entries(CHARLAS_VESTUARIO).map(([k, v]) =>
+    `• \`/dt charla ${k}\` — **${v.title}**: *"${v.text}"*`
+  ).join('\n\n');
+
+  const embed = new EmbedBuilder()
+    .setColor(0xe67e22)
+    .setTitle(`🗣️ Vestuario & Charlas de Motivación`)
+    .setDescription(
+      `Inspira o exige concentración a tus dirigidos antes del próximo partido:\n\n${talksText}`
+    );
+
+  return { ok: true, ephemeral: true, embeds: [embed], components: [dtContinueRow(userId, manager)] };
+}
+
+function dtTransfersView(userId, buyIndex) {
+  const manager = storage.getManager(userId);
+  if (!manager) return { ok: false, ephemeral: true, content: 'No tienes carrera activa como DT.' };
+
+  const market = getTransferMarketForManager(manager);
+
+  if (buyIndex !== undefined && buyIndex !== null && !isNaN(buyIndex)) {
+    const res = signPlayerForManager(manager, parseInt(buyIndex));
+    if (!res.ok) return { ok: false, ephemeral: true, content: `❌ ${res.reason || res.message}` };
+    storage.setManager(userId, manager);
+
+    const cost = res.player.marketValue || 0;
+    const embed = new EmbedBuilder()
+      .setColor(0x2ecc71)
+      .setTitle(`🤝 ¡NUEVO FICHAJE CONFIRMADO EN ${manager.club.toUpperCase()}!`)
+      .setDescription(
+        `**${res.player.name}** (${res.player.position}) se incorpora a la plantilla de ${manager.club}.\n\n` +
+        `• Media: ⭐ **${res.player.overall} OVR**\n` +
+        `• Coste del Fichaje: 💰 **$${cost.toLocaleString('en-US')}**\n` +
+        `• Presupuesto restante: 💰 **$${manager.budget.toLocaleString('en-US')}**`
+      );
+    return { ok: true, ephemeral: false, embeds: [embed], components: [dtContinueRow(userId, manager)] };
+  }
+
+  const lines = market.map((p, idx) =>
+    `\`#${idx + 1}\` **${p.name}** (${p.position}) — Media: **${p.overall}** | Edad: ${p.age}\n` +
+    `└ 💰 Costo: **$${(p.marketValue || p.price || 0).toLocaleString('en-US')}** | Sueldo: $${(p.wage || 0).toLocaleString('en-US')}/sem | Fichar: \`/dt fichar ${idx + 1}\``
+  ).join('\n\n');
+
+  const embed = new EmbedBuilder()
+    .setColor(0xf39c12)
+    .setTitle(`💼 Mercado de Fichajes y Refuerzos · ${manager.club}`)
+    .setDescription(
+      `Presupuesto disponible: 💰 **$${manager.budget.toLocaleString('en-US')}**\n\n` +
+      `${lines}\n\n` +
+      `💡 Para fichar a un jugador, usa \`/dt fichar [número]\`.`
+    );
+
+  return { ok: true, ephemeral: true, embeds: [embed], components: [dtContinueRow(userId, manager)] };
+}
+
+function dtYouthAcademyView(userId, doPromote = false) {
+  const manager = storage.getManager(userId);
+  if (!manager) return { ok: false, ephemeral: true, content: 'No tienes carrera activa como DT.' };
+
+  if (doPromote) {
+    const res = promoteYouthForManager(manager);
+    if (!res.ok) return { ok: false, ephemeral: true, content: `❌ ${res.reason || res.message}` };
+    storage.setManager(userId, manager);
+
+    const prospect = res.prospect || res.player;
+    const embed = new EmbedBuilder()
+      .setColor(0x27ae60)
+      .setTitle(`🌟 ¡JOYA DE LA CANTERA PROMOVIDA AL PRIMER EQUIPO!`)
+      .setDescription(
+        `**${prospect.name}** (${prospect.position}, ${prospect.age} años) firma su primer contrato profesional con **${manager.club}**.\n\n` +
+        `• Media actual: ⭐ **${prospect.overall} OVR**\n` +
+        `• Potencial proyectado: 🚀 **${prospect.potential} POT**\n` +
+        `• Valor de mercado inicial: 💰 **$${prospect.marketValue.toLocaleString('en-US')}**\n\n` +
+        `¡Ya está disponible en tu plantilla para alinear o suplente!`
+      );
+    return { ok: true, ephemeral: false, embeds: [embed], components: [dtContinueRow(userId, manager)] };
+  }
+
+  const embed = new EmbedBuilder()
+    .setColor(0x16a085)
+    .setTitle(`🌱 Academia de Juveniles & Fuerzas Básicas · ${manager.club}`)
+    .setDescription(
+      `Las divisiones inferiores están formando a nuevas promesas para el futuro de ${manager.club}.\n\n` +
+      `¿Deseas subir al primer equipo a la joya más destacada de la cantera?\n` +
+      `Usa el comando \`/dt cantera\` para promoverlo inmediatamente.`
+    );
+
+  return { ok: true, ephemeral: true, embeds: [embed], components: [dtContinueRow(userId, manager)] };
+}
+
+function dtCupsView(userId) {
+  const manager = storage.getManager(userId);
+  if (!manager) return { ok: false, ephemeral: true, content: 'No tienes carrera activa como DT.' };
+
+  const embed = new EmbedBuilder()
+    .setColor(0xf1c40f)
+    .setTitle(`🏆 Cuadro de Copas y Torneos · ${manager.club}`)
+    .setDescription(
+      `**Estado Actual de Competiciones:**\n\n` +
+      `📍 **Liga:** ${manager.leagueName} (Jornada ${manager.matchdayIndex}/${manager.matchdayTotal || 16})\n` +
+      `🏆 **Copa Nacional:** ${manager.nationalCup ? `${manager.nationalCup.name} (${phaseLabel(manager.nationalCup)})` : 'Por disputarse o concluida'}\n` +
+      `🌎 **Copa Continental (Libertadores/Champions):** ${manager.cup ? `${manager.cup.name} (${phaseLabel(manager.cup)})` : (manager.qualifiedContinentalCup ? `Clasificado a ${cupNameFor(manager.qualifiedContinentalCup)}` : 'Sin clasificación activa')}\n\n` +
+      `🏆 **Títulos conseguidos como DT:**\n` +
+      (manager.trophies && manager.trophies.length ? manager.trophies.map(t => `• ${t}`).join('\n') : 'Aún no has levantado trofeos en este club.')
+    );
+
+  return { ok: true, ephemeral: true, embeds: [embed], components: [dtContinueRow(userId, manager)] };
 }
 
 function dtTableView(userId) {
@@ -2436,7 +2952,7 @@ function dtOffersView(userId) {
       offers.map((o, idx) =>
         `**${idx + 1}. ${o.club}** (${o.country} · ${o.leagueName})\n` +
         `• Media del Club: ⭐ **${o.clubMedia} OVR**\n` +
-        `• Presupuesto de Fichajes: 💰 **$${o.budget.toLocaleString('en-US')}**\n` +
+        `• Presupuesto de Fichajes: 💰 **${o.budget.toLocaleString('en-US')}**\n` +
         `• Objetivo: *${o.expectation}*\n` +
         `• *"${o.pitch}"*\n`
       ).join('\n') +
@@ -2484,7 +3000,7 @@ function dtAcceptOfferAction(userId, offerIndexOrName) {
     .setDescription(
       `**${manager.name}** ha sido presentado oficialmente como el nuevo Director Técnico de **${result.club}** (${result.league}).\n\n` +
       `💼 **Condiciones del nuevo proyecto:**\n` +
-      `• Presupuesto para fichajes: 💰 **$${result.budget.toLocaleString('en-US')}**\n` +
+      `• Presupuesto para fichajes: 💰 **${result.budget.toLocaleString('en-US')}**\n` +
       `• Plantel recibido: **${result.squadCount} futbolistas** listos para tu esquema táctico.\n` +
       `• Nuevo calendario de liga preparado.\n\n` +
       `¡Éxitos en tu nueva era!`
@@ -2517,7 +3033,7 @@ function dtPanelView(userId) {
       `**Liga:** ${manager.leagueName} · **Temporada:** ${manager.season}\n` +
       `**Posición en Tabla:** ${pos > 0 ? `**#${pos}** (${manager.seasonStats.points} pts)` : 'Por comenzar'}\n` +
       `**Próximo Rival:** ⚔️ **${currentOpp}** (Fecha ${manager.matchdayIndex + 1}/${manager.matchdayTotal || 16})\n` +
-      `**Presupuesto:** 💰 $${manager.budget.toLocaleString('en-US')} · **Reputación:** ⭐ ${manager.reputation}/99\n\n` +
+      `**Presupuesto:** 💰 ${manager.budget.toLocaleString('en-US')} · **Reputación:** ⭐ ${manager.reputation}/99\n\n` +
       `📈 **Métricas de Equipo:**\n` +
       `• Media Titular: **${metrics.avgRating}** | Química de Equipo: **${metrics.chemistry}%** 🧪\n` +
       `• Confianza Directiva: **${manager.boardConfidence}%** | Confianza Hinchada: **${manager.fanConfidence}%**\n` +
@@ -2528,11 +3044,27 @@ function dtPanelView(userId) {
       xi.map((p, idx) => `${idx + 1}. **${p.name}** (${p.position} ${p.overall}) — ${p.goals}G / ${p.assists}A`).join('\n')
     );
 
+  const row1 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`dt_sim:${userId}`).setLabel('▶️ Siguiente Partido').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`dt_fastseason:${userId}`).setLabel('⏩ Simular Temporada').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`dt_plantilla:${userId}`).setLabel('👥 Plantilla').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`dt_alinear:${userId}`).setLabel('⚡ Once Ideal').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`dt_tabla:${userId}`).setLabel('📊 Tabla').setStyle(ButtonStyle.Secondary)
+  );
+
+  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`dt_tactica:${userId}`).setLabel('📋 Táctica').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`dt_charla:${userId}`).setLabel('🗣️ Charla').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`dt_fichar:${userId}`).setLabel('💼 Fichar').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`dt_cantera:${userId}`).setLabel('🌱 Cantera').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`dt_copas:${userId}`).setLabel('🏆 Copas').setStyle(ButtonStyle.Secondary)
+  );
+
   return {
     ok: true,
     ephemeral: true,
     embeds: [embed],
-    components: [dtContinueRow(userId, manager)]
+    components: [row1, row2]
   };
 }
 
@@ -2615,6 +3147,14 @@ module.exports = {
   dtPanelView,
   dtRetireAction,
   dtAcceptOfferAction,
+  dtSquadView,
+  dtTacticView,
+  dtTeamTalkView,
+  dtTransfersView,
+  dtYouthAcademyView,
+  dtCupsView,
+  dtAutoLineupAction,
+  promptForDTFinal,
   // 15 Deep Systems
   injuryView,
   injuryTreatAction,
