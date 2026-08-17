@@ -34,8 +34,8 @@ const { normalizeEconomy, calculateMarketValue, calculateReleaseClause, calculat
 const { normalizeReputationStats, recordMatchReputation, getReputationSummary } = require('../utils/reputation.js');
 const { formatCareerTimeline, recordSeasonInTimeline } = require('../utils/careerTimeline.js');
 const { getNationalTeamStatus, getFIFARankings } = require('../utils/nationalTeams.js');
-const { generateSocialFeed } = require('../utils/socialMedia.js');
-const { generateNewsFeed } = require('../utils/newsEngine.js');
+const { generateSocialFeed, formatSocialFeedEmbed } = require('../utils/socialMedia.js');
+const { generateNewsFeed, generateNewsHeadline, formatNewsFeedEmbed } = require('../utils/newsEngine.js');
 const { getClubAcademy, promoteProspect, generateYouthAcademy } = require('../utils/academy.js');
 const { inductIntoHallOfFame, formatHallOfFameEmbed } = require('../utils/hallOfFame.js');
 const { getTopOverall, getTopMarketValue, getTopWonderkids, getTopByCountry } = require('../utils/worldRankings.js');
@@ -327,7 +327,8 @@ function applyMatchToPlayer(player, result, { national = false } = {}) {
   });
 
   // 3. Sistema de Redes Sociales y Noticias Dinámicas
-  player.lastSocialFeed = generateSocialFeed(player, result);
+  const socialPosts = generateSocialFeed(player, result);
+  player.lastSocialFeed = formatSocialFeedEmbed(socialPosts);
   player.lastNewsFeed = generateNewsFeed(player, { matchResult: result });
 }
 
@@ -1459,18 +1460,24 @@ function socialFeedView(userId) {
   const player = storage.getPlayer(userId);
   if (!player) return noPlayer();
 
-  const feed = player.lastSocialFeed || generateSocialFeed(player, {
-    playerGoals: player.seasonStats.goals,
-    playerAssists: player.seasonStats.assists,
-    rating: 7.2,
-    result: 'V',
-    opponent: 'Rival'
-  });
+  let feed = player.lastSocialFeed;
+  if (!feed) {
+    const posts = generateSocialFeed(player, {
+      playerGoals: player.seasonStats.goals,
+      playerAssists: player.seasonStats.assists,
+      rating: 7.2,
+      result: 'V',
+      opponent: 'Rival'
+    });
+    feed = formatSocialFeedEmbed(posts);
+  }
+
+  const feedStr = typeof feed === 'string' ? feed : formatSocialFeedEmbed(feed);
 
   const embed = new EmbedBuilder()
     .setColor(0x1da1f2)
     .setTitle(`📱 Feed Social & Tendencias — @${player.name.replace(/\s+/g, '_').toLowerCase()}`)
-    .setDescription(feed.slice(0, 4000));
+    .setDescription(feedStr.slice(0, 4000));
 
   return { ok: true, ephemeral: false, embeds: [embed], components: (!player.retired && player.stage !== 'entretemporada') ? [continueRow(userId)] : [] };
 }
@@ -1490,10 +1497,12 @@ function newsFeedView(userId) {
     }
   });
 
+  const newsStr = typeof news === 'string' ? news : formatNewsFeedEmbed(news);
+
   const embed = new EmbedBuilder()
     .setColor(0xc0392b)
     .setTitle(`📰 Diario Deportivo — Última Edición`)
-    .setDescription(news.slice(0, 4000));
+    .setDescription(newsStr.slice(0, 4000));
 
   return { ok: true, ephemeral: false, embeds: [embed], components: (!player.retired && player.stage !== 'entretemporada') ? [continueRow(userId)] : [] };
 }
