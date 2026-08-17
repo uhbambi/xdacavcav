@@ -16,6 +16,16 @@ const LAST_NAMES = [
   'Castillo', 'García', 'Alarcón', 'Herrera', 'Campos', 'Valenzuela', 'Baeza'
 ];
 
+const PROSPECT_TRAITS = [
+  'Regateador Eléctrico ⚡',
+  'Defensor Férreo 🛡️',
+  'Francotirador de Larga Distancia 🎯',
+  'Visión Panorámica 🪄',
+  'Portento Físico 🦍',
+  'Arquero Felino 🧤',
+  'Instinto Goleador ⚽'
+];
+
 /**
  * Genera un canterano / wonderkid procedural
  */
@@ -26,7 +36,6 @@ function generateYouthProspect(clubMedia = 70, nationality = 'Chile') {
   const age = rand(15, 18);
 
   const attributes = newAttributes(position);
-  // Escala para que la media inicial sea entre 58 y 73
   const targetOvr = Math.max(56, Math.min(74, Math.round(clubMedia * 0.85 + rand(-4, 6))));
   const current = overallFrom(attributes, position);
   const diff = targetOvr - current;
@@ -35,13 +44,14 @@ function generateYouthProspect(clubMedia = 70, nationality = 'Chile') {
   }
 
   const overall = overallFrom(attributes, position);
-  // Potencial alto (Wonderkid potential)
   const potential = Math.min(95, Math.max(overall + rand(12, 24), rand(80, 95)));
 
-  let scoutVerdict = 'Promesa interesante de la academia';
+  let scoutVerdict = 'Promesa con interesante margen de proyección';
   if (potential >= 90) scoutVerdict = '💎 ¡JOYA GENERACIONAL! Potencial Balón de Oro';
   else if (potential >= 85) scoutVerdict = '🌟 Wonderkid con futuro de Selección Absoluta';
   else if (potential >= 80) scoutVerdict = '📈 Titular garantizado de Primera División';
+
+  const marketValue = Math.round(Math.pow(overall / 40, 4) * 120000 * (potential / 70));
 
   return {
     id: `youth_${Date.now()}_${rand(100, 999)}`,
@@ -52,8 +62,11 @@ function generateYouthProspect(clubMedia = 70, nationality = 'Chile') {
     attributes,
     overall,
     potential,
+    trait: pick(PROSPECT_TRAITS),
+    scoutReport: scoutVerdict,
     scoutVerdict,
-    value: Math.round(Math.pow(overall / 40, 4) * 120000 * (potential / 70)),
+    marketValue,
+    value: marketValue,
     promoted: false
   };
 }
@@ -70,7 +83,33 @@ function generateClubAcademy(clubName = 'Club', clubMedia = 70, nationality = 'C
   return prospects;
 }
 
+const _academyCache = {};
+
+function getClubAcademy(clubName = 'Club', clubMedia = 70, nationality = 'Chile') {
+  if (!_academyCache[clubName]) {
+    _academyCache[clubName] = {
+      club: clubName,
+      prospects: generateClubAcademy(clubName, clubMedia, nationality)
+    };
+  }
+  return _academyCache[clubName];
+}
+
+function promoteProspect(clubName, prospectId) {
+  const academy = getClubAcademy(clubName);
+  const index = academy.prospects.findIndex(p => p.id === prospectId);
+  if (index >= 0) {
+    const [promoted] = academy.prospects.splice(index, 1);
+    promoted.promoted = true;
+    return promoted;
+  }
+  return null;
+}
+
 module.exports = {
   generateYouthProspect,
-  generateClubAcademy
+  generateClubAcademy,
+  generateYouthAcademy: generateClubAcademy,
+  getClubAcademy,
+  promoteProspect
 };
