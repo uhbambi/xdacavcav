@@ -79,6 +79,13 @@ const AWARDS_CATALOG = {
     emoji: '🪄',
     prestigePoints: 8,
     desc: 'Líder en pases de gol y visión de juego.'
+  },
+  PUSKAS_AWARD: {
+    id: 'PUSKAS_AWARD',
+    name: 'Premio Puskás de la FIFA (Mejor Gol del Año)',
+    emoji: '🚀',
+    prestigePoints: 18,
+    desc: 'Galardón al gol más espectacular, acrobático y legendario de la temporada.'
   }
 };
 
@@ -152,6 +159,16 @@ function evaluateSeasonAwards(player, extraContext = {}) {
   // 10. Balón de oro del Mundial (si hubo mundial ganado)
   if (extraContext.wonWorldCup && avg >= 7.8) {
     wonAwards.push(`🌍 Balón de Oro del Mundial de la FIFA (${player.season})`);
+  }
+
+  // 11. Premio Puskás de la FIFA (Mejor Gol del Año)
+  const hasPuskasCandidate = player.seasonBestGoal || (s.goals >= 8 && (player.attributes?.tiro >= 70 || player.attributes?.regate >= 72 || Math.random() < 0.35));
+  if (player.position !== 'POR' && hasPuskasCandidate && s.goals >= 5) {
+    // Si metió goles destacados y tuvo buena temporada ofensiva
+    if (Math.random() < 0.45 || player.puskasNominated) {
+      const goalDesc = player.seasonBestGoal || 'Chilena acrobática al ángulo de media distancia';
+      wonAwards.push(`🚀 Premio Puskás de la FIFA [${goalDesc}] (Temporada ${player.season})`);
+    }
   }
 
   return wonAwards;
