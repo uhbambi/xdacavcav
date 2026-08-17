@@ -3,6 +3,12 @@
 const { getAllClubs, getLeague, LEAGUES, startingLeagueKeyFor } = require('../data/clubs.js');
 const { rand, pick } = require('./simulation.js');
 const { newAttributes, overallFrom, distributeGrowth } = require('./attributes.js');
+const { calculateMarketValue, calculateReleaseClause, calculateWages, normalizeEconomy, calculateNetWorth, calculateWeeklyExpenses, formatMoney } = require('./economy.js');
+const { normalizeReputationStats } = require('./reputation.js');
+const { normalizePersonality } = require('./personality.js');
+const { updateDynamicPotential } = require('./dynamicPotential.js');
+const { evaluateSeasonAwards } = require('./awards.js');
+const { recordSeasonInTimeline } = require('./careerTimeline.js');
 
 /** Club de inicio: siempre uno chico de la division mas baja disponible de tu pais */
 function startingClub(countryKey) {
@@ -71,11 +77,8 @@ const SHOP_ITEMS = {
 };
 
 function calculateSalary(player) {
-  const ovr = player.overall || 60;
-  const clubTier = player.clubTier || 1;
-  const agentBoost = player.superagentPurchased ? 1.25 : 1.0;
-  const base = Math.round(Math.pow(ovr / 42, 3.7) * 1500 * (1 + clubTier * 0.45) * agentBoost);
-  return Math.max(20000, base);
+  const { annualWage } = calculateWages(player);
+  return annualWage;
 }
 
 function newPlayer({ name, position, nationalityLeagueKey }) {
@@ -83,19 +86,23 @@ function newPlayer({ name, position, nationalityLeagueKey }) {
   const attributes = newAttributes(position);
   const overall = overallFrom(attributes, position);
 
-  return {
+  const initialPlayer = {
     name,
     position,
     nationality: club.country,
     age: 17,
     attributes,
     overall,
-    potential: Math.max(overall + 8, rand(74, 95)),
+    potential: Math.max(overall + 10, rand(76, 95)),
     trainingFocus: null,
     trainingsThisWeek: 0,
-    morale: 70,
+    morale: 75,
     bank: 60000,
     salary: 25000,
+    weeklyWage: 480,
+    marketValue: 120000,
+    releaseClause: 300000,
+    contractYears: 3,
     inventory: [],
     mansionPurchased: false,
     trainerPurchased: false,
@@ -114,6 +121,9 @@ function newPlayer({ name, position, nationalityLeagueKey }) {
     roundSchedule: [],
     leagueClubs: [],
     injuredMatches: 0,
+    injury: null,
+    injuryHistory: [],
+    derbyStats: {},
     suspendedMatches: 0,
     stage: 'liga', // 'liga' | 'copa_nacional' | 'copa' | 'mundial' | 'copa_seleccion' | 'entretemporada'
     table: {},
@@ -141,6 +151,18 @@ function newPlayer({ name, position, nationalityLeagueKey }) {
     retired: false,
     createdAt: Date.now()
   };
+
+  normalizePersonality(initialPlayer);
+  normalizeReputationStats(initialPlayer);
+  normalizeEconomy(initialPlayer);
+
+  const { annualWage, weeklyWage } = calculateWages(initialPlayer);
+  initialPlayer.salary = annualWage;
+  initialPlayer.weeklyWage = weeklyWage;
+  initialPlayer.marketValue = calculateMarketValue(initialPlayer);
+  initialPlayer.releaseClause = calculateReleaseClause(initialPlayer, initialPlayer.marketValue);
+
+  return initialPlayer;
 }
 
 /**
@@ -204,6 +226,9 @@ function normalizePlayer(player) {
   if (!Array.isArray(player.roundSchedule)) player.roundSchedule = [];
   if (!player.table || typeof player.table !== 'object') player.table = {};
   if (typeof player.injuredMatches !== 'number') player.injuredMatches = 0;
+  if (player.injury === undefined) player.injury = null;
+  if (!Array.isArray(player.injuryHistory)) player.injuryHistory = [];
+  if (!player.derbyStats || typeof player.derbyStats !== 'object') player.derbyStats = {};
   if (typeof player.suspendedMatches !== 'number') player.suspendedMatches = 0;
   if (typeof player.extraOffers !== 'number') player.extraOffers = 0;
   if (!player.nationality) {
@@ -211,8 +236,17 @@ function normalizePlayer(player) {
     player.nationality = league ? league.country : 'Chile';
   }
 
+  normalizePersonality(player);
+  normalizeReputationStats(player);
+  normalizeEconomy(player);
+
   if (typeof player.bank !== 'number') player.bank = 60000;
   if (typeof player.salary !== 'number') player.salary = calculateSalary(player);
+  if (typeof player.weeklyWage !== 'number') player.weeklyWage = Math.round(player.salary / 52);
+  if (typeof player.marketValue !== 'number') player.marketValue = calculateMarketValue(player);
+  if (typeof player.releaseClause !== 'number') player.releaseClause = calculateReleaseClause(player, player.marketValue);
+  if (typeof player.contractYears !== 'number') player.contractYears = rand(2, 4);
+
   if (!Array.isArray(player.inventory)) player.inventory = [];
   if (typeof player.trainingsThisWeek !== 'number') player.trainingsThisWeek = 0;
   if (player.mansionPurchased === undefined) player.mansionPurchased = false;
@@ -298,23 +332,52 @@ function developPlayer(player) {
     else if (room <= 8) points = Math.min(points, 4);
   }
 
+  // Potencial dinámico antes y después
+  const potResult = updateDynamicPotential(player);
+
   const gained = distributeGrowth(player.attributes, player.position, points, player.trainingFocus);
   const before = player.overall;
   player.overall = Math.min(player.potential, overallFrom(player.attributes, player.position));
   player.age += 1;
 
-  // Pago de sueldo y beneficios al final de temporada
-  const annualSalary = calculateSalary(player);
-  player.salary = annualSalary;
+  // Actualización de economía
+  const { annualWage, weeklyWage } = calculateWages(player);
+  player.salary = annualWage;
+  player.weeklyWage = weeklyWage;
+  player.marketValue = calculateMarketValue(player);
+  player.releaseClause = calculateReleaseClause(player, player.marketValue);
+
+  // Contrato restante
+  if (typeof player.contractYears === 'number') {
+    player.contractYears = Math.max(1, player.contractYears - 1);
+  } else {
+    player.contractYears = 2;
+  }
+
+  // Pago de sueldo, pasivos y deducción de gastos
   const passiveIncome = (player.realEstateCount || 0) * 200000;
-  player.bank = (player.bank || 0) + annualSalary + passiveIncome;
+  const annualExpenses = calculateWeeklyExpenses(player) * 52;
+  const netEarnings = Math.max(0, annualWage + passiveIncome - annualExpenses);
+  player.bank = (player.bank || 0) + netEarnings;
 
   // Límite de retiro mandatorio a los 42 años
   if (player.age >= 42) {
     player.retired = true;
   }
 
-  return { points, gained, growth: player.overall - before, annualSalary, passiveIncome };
+  return {
+    points,
+    gained,
+    growth: player.overall - before,
+    annualSalary: annualWage,
+    weeklyWage,
+    marketValue: player.marketValue,
+    passiveIncome,
+    annualExpenses,
+    netEarnings,
+    potentialDelta: potResult.delta,
+    newPotential: player.potential
+  };
 }
 
 /** Comprar artículo de la tienda */
@@ -442,59 +505,7 @@ function generateOffers(player, { count = null } = {}) {
 
 /** Premios individuales al cierre de temporada */
 function seasonAwards(player) {
-  const awards = [];
-  const s = player.seasonStats;
-  const avg = s.apps > 0 ? s.avgRatingSum / s.apps : 0;
-  const hasBigTrophy = player.career.trophies.some(t =>
-    t.includes('Champions') || t.includes('Libertadores') || t.includes('Mundial') ||
-    t.includes('Copa América') || t.includes('Eurocopa')
-  );
-
-  // Balón de Oro (Ballon d'Or)
-  if (avg >= 8.0 && player.overall >= 80 && (hasBigTrophy || s.goals >= 28 || s.cleanSheets >= 14 || s.assists >= 20)) {
-    awards.push(`🌟 Balón de Oro (Temporada ${player.season})`);
-  }
-
-  // The Best FIFA
-  if (avg >= 7.85 && player.overall >= 78 && s.apps >= 12) {
-    awards.push(`🏆 The Best FIFA Player (Temporada ${player.season})`);
-  }
-
-  // Golden Boy (jóvenes menores de 22 años)
-  if (player.age <= 21 && player.overall >= 74 && s.apps >= 10 && (s.goals >= 10 || s.assists >= 8 || avg >= 7.5)) {
-    awards.push(`👶 Premio Golden Boy (Temporada ${player.season})`);
-  }
-
-  // Rey de América (si juega en liga Sudamericana y destaca)
-  const league = getLeague(player.leagueKey);
-  if (league && league.confed === 'CONMEBOL' && avg >= 7.6 && s.apps >= 10) {
-    if (player.career.trophies.some(t => t.includes('Libertadores') || t.includes('Sudamericana') || t.includes('Copa América'))) {
-      awards.push(`👑 Rey de América (Temporada ${player.season})`);
-    }
-  }
-
-  // Trofeo Yashin (Mejor Portero)
-  if (player.position === 'POR' && (s.cleanSheets >= 10 || avg >= 7.7) && s.apps >= 10) {
-    awards.push(`🧤 Trofeo Yashin / Mejor Arquero del Año (Temporada ${player.season})`);
-  }
-
-  // FIFPRO World 11
-  if (avg >= 7.6 && player.overall >= 80 && s.apps >= 12) {
-    awards.push(`👕 FIFPRO World 11 (Temporada ${player.season})`);
-  }
-
-  // Goleadores y Asistencias
-  if (s.goals >= 25) awards.push(`👟 Bota de Oro (Temporada ${player.season})`);
-  else if (s.goals >= 18) awards.push(`⚽ Goleador de la Temporada (${player.season})`);
-  if (s.assists >= 14) awards.push(`🪄 Máximo Asistente del Año (${player.season})`);
-  if (avg >= 7.8 && s.apps >= 8 && !awards.some(a => a.includes('MVP'))) {
-    awards.push(`🎖️ MVP del Campeonato (${player.season})`);
-  }
-  if (player.position === 'POR' && s.cleanSheets >= 8 && !awards.some(a => a.includes('Yashin'))) {
-    awards.push(`🧤 Guante de Oro (Temporada ${player.season})`);
-  }
-
-  return awards;
+  return evaluateSeasonAwards(player);
 }
 
 /** Veredicto final al retirarse */
