@@ -2514,8 +2514,10 @@ function dtSimulateStep(userId) {
     return { ok: false, ephemeral: true, content: `Esta carrera de DT con **${manager.name}** ya ha finalizado por retiro. Usa \`/dt crear\` para iniciar una nueva carrera.` };
   }
 
-  // 1. Si está en entretemporada, avanzar a la siguiente
-  if (manager.stage === 'entretemporada' || manager.matchdayIndex >= (manager.matchdayTotal || 16)) {
+  // 1. Si está en entretemporada, avanzar a la siguiente temporada
+  // (Ojo: NO usar matchdayIndex aquí; durante las copas la liga ya terminó y
+  //  reiniciar la temporada en ese punto se saltaba las copas y duplicaba fechas.)
+  if (manager.stage === 'entretemporada') {
     advanceDTLeague(manager);
     manager.stage = 'liga';
     storage.setManager(userId, manager);
@@ -2525,6 +2527,18 @@ function dtSimulateStep(userId) {
   if (!manager.stage || manager.stage === 'liga') {
     manager.stage = 'liga';
     const opponent = ensureDTFixture(manager);
+
+    // Si la liga ya se completó (estado guardado por versiones anteriores), pasar directo a la Copa Nacional
+    if (manager.matchdayIndex >= manager.fixture.length) {
+      const tableEnd = dtTableSorted(manager.table || []);
+      const posEnd = tableEnd.findIndex(t => t.club === manager.club) + 1;
+      manager.qualifiedContinentalCup = getContinentalQualification(manager.leagueKey, posEnd);
+      manager.stage = 'copa_nacional';
+      manager.nationalCup = createNationalCup({ club: manager.club, leagueKey: manager.leagueKey });
+      storage.setManager(userId, manager);
+      return dtSimulateStep(userId);
+    }
+
     const matchSim = simulateDTMatch(manager, opponent);
     storage.setManager(userId, manager);
 
@@ -2682,16 +2696,15 @@ function dtSimulateStep(userId) {
     };
   }
 
-  // Fallback a simulación de partido
-  const opponent = ensureDTFixture(manager);
-  const matchSim = simulateDTMatch(manager, opponent);
+  // Fallback: estado inconsistente (etapa de copa sin torneo activo, etc.) → cerrar la temporada y continuar
+  manager.nationalCup = null;
+  manager.cup = null;
+  manager.stage = 'entretemporada';
+  if (!manager.jobOffers || !manager.jobOffers.length) {
+    manager.jobOffers = generateManagerOffers(manager);
+  }
   storage.setManager(userId, manager);
-  return {
-    ok: true,
-    ephemeral: false,
-    embeds: [new EmbedBuilder().setTitle(`⚽ Partido DT`).setDescription(`${manager.club} ${matchSim.myGoals} - ${matchSim.oppGoals} ${matchSim.opponentName}`)],
-    components: [dtContinueRow(userId, manager)]
-  };
+  return dtSimulateStep(userId);
 }
 
 function dtSimulateEntireSeason(userId) {
@@ -2707,8 +2720,9 @@ function dtSimulateEntireSeason(userId) {
     manager.trophies = manager.records?.trophies || [];
   }
 
-  // Si ya estaba en entretemporada, avanzamos a la siguiente
-  if (manager.stage === 'entretemporada' || manager.matchdayIndex >= (manager.matchdayTotal || 16)) {
+  // Si ya estaba en entretemporada, avanzamos a la siguiente temporada
+  // (NO usar matchdayIndex: durante las copas la liga ya terminó y eso reiniciaba la temporada.)
+  if (manager.stage === 'entretemporada') {
     advanceDTLeague(manager);
     manager.stage = 'liga';
     storage.setManager(userId, manager);
@@ -2716,10 +2730,13 @@ function dtSimulateEntireSeason(userId) {
 
   // 1. Simular Liga
   if (!manager.stage || manager.stage === 'liga') {
+    manager.stage = 'liga';
     ensureDTFixture(manager);
-    while (manager.matchdayIndex < (manager.matchdayTotal || 16)) {
+    while (manager.matchdayIndex < manager.fixture.length) {
       const opp = manager.fixture[manager.matchdayIndex];
+      const before = manager.matchdayIndex;
       simulateDTMatch(manager, opp);
+      if (manager.matchdayIndex === before) break; // seguridad anti-bucle infinito
     }
 
     const table = dtTableSorted(manager.table || []);
@@ -3059,6 +3076,7 @@ function dtTableView(userId) {
   }
 
   ensureDTFixture(manager);
+  storage.setManager(userId, manager); // persistir la auto-reparación de tabla/fixture si la hubo
   const table = dtTableSorted(manager.table || []);
 
   const lines = table.map((row, idx) => {

@@ -293,6 +293,7 @@ function newManager({ name, clubName, userId, startingAge = 42, tacticStyle = 'o
     leagueKey: club.leagueKey,
     leagueName: league.name,
     country: league.country,
+    stage: 'liga',
     reputation: Math.min(99, Math.max(30, (club.media || 65) - 5 + rand(0, 5))),
     tacticStyle,
     formation,
@@ -561,13 +562,18 @@ function simulateDTMatch(manager, opponentName, teamTalk = null, inGameTactics =
     p.stamina = Math.max(50, p.stamina - rand(8, 15));
   });
 
-  // Si hay fixture de liga activo, avanzar calendario y tabla de posiciones
-  const leagueUpdate = advanceDTLeague(manager, {
-    opponentName,
-    myGoals,
-    oppGoals,
-    result
-  });
+  // Solo los partidos de LIGA avanzan el calendario y la tabla de posiciones.
+  // Los partidos de Copa Nacional, Libertadores/Champions, etc. NUNCA tocan la tabla de liga
+  // (antes este llamado incondicional metía a los rivales de copa en la tabla y rompía todo).
+  const isLeagueMatch = !manager.stage || manager.stage === 'liga';
+  const leagueUpdate = isLeagueMatch
+    ? advanceDTLeague(manager, {
+        opponentName: oppNameStr,
+        myGoals,
+        oppGoals,
+        result
+      })
+    : null;
 
   // Posibles ofertas espontáneas si el DT está teniendo una racha brutal
   if (manager.seasonStats.matches >= 5 && (manager.seasonStats.wins / manager.seasonStats.matches) >= 0.75) {
@@ -577,14 +583,14 @@ function simulateDTMatch(manager, opponentName, teamTalk = null, inGameTactics =
   }
 
   // Generar preguntas para la rueda de prensa post-partido del DT
-  const pressConference = generatePressConference(manager, opponentName, result, myGoals, oppGoals);
+  const pressConference = generatePressConference(manager, oppNameStr, result, myGoals, oppGoals);
 
   return {
     result,
     myGoals,
     oppGoals,
     myClub: manager.club,
-    opponentName,
+    opponentName: oppNameStr,
     classicData,
     events,
     pressConference,
@@ -611,16 +617,52 @@ function dtTableSorted(table) {
 }
 
 /**
- * Garantiza un fixture completo y rotatorio sin rivales repetidos en Modo DT
+ * Clubes que componen la liga del DT esta temporada.
+ * Si el club del DT es personalizado (no existe en la base de datos),
+ * reemplaza al club más débil de la división para mantener la cantidad exacta de equipos.
+ */
+function dtLeagueClubs(manager) {
+  const leagueClubs = getAllClubs().filter(c => c.leagueKey === manager.leagueKey);
+  const myClub = { name: manager.club, media: manager.clubMedia || 65, leagueKey: manager.leagueKey };
+
+  if (!leagueClubs.length) return [myClub];
+  if (leagueClubs.some(c => c.name === manager.club)) return leagueClubs;
+
+  const sorted = [...leagueClubs].sort((a, b) => (a.media || 0) - (b.media || 0));
+  const replaced = sorted[0].name;
+  return leagueClubs.map(c => (c.name === replaced ? myClub : c));
+}
+
+/**
+ * Garantiza un fixture y una tabla de liga válidos en Modo DT.
+ *
+ * - La tabla SOLO contiene a los clubes de la liga (los rivales de copa nunca entran acá).
+ * - El fixture NO se regenera al terminar la temporada (eso lo maneja advanceDTLeague al
+ *   arrancar la temporada nueva); así se evita que la liga "se duplique" (PJ 30 en ligas de 15 fechas).
+ * - Si detecta datos corruptos guardados por versiones anteriores (clubes de otras ligas
+ *   mezclados en la tabla, PJ imposibles, fixture inválido), se auto-repara reiniciando
+ *   la liga de la temporada en curso con los clubes correctos.
  */
 function ensureDTFixture(manager) {
-  const allClubsInLeague = getAllClubs().filter(c => c.leagueKey === manager.leagueKey);
-  const opponents = allClubsInLeague.filter(c => c.name !== manager.club);
+  const clubs = dtLeagueClubs(manager);
+  const clubNames = clubs.map(c => c.name);
+  const opponents = clubs.filter(c => c.name !== manager.club);
 
-  // Inicializar tabla si no existe
-  if (!manager.table || !Array.isArray(manager.table) || manager.table.length === 0) {
-    const clubsForTable = allClubsInLeague.length >= 4 ? allClubsInLeague : [findClub(manager.club) || { name: manager.club }, ...opponents];
-    manager.table = clubsForTable.map(c => ({
+  // Cantidad de fechas esperadas: ida y vuelta si la liga es chica, solo ida si es grande
+  const expectedRounds = opponents.length === 0 ? 4 : (opponents.length <= 8 ? opponents.length * 2 : opponents.length);
+
+  const tableOk = Array.isArray(manager.table)
+    && manager.table.length === clubNames.length
+    && manager.table.every(t => t && clubNames.includes(t.club) && (t.pj || 0) <= expectedRounds);
+
+  const fixtureOk = Array.isArray(manager.fixture)
+    && manager.fixture.length === expectedRounds
+    && (opponents.length === 0 || manager.fixture.every(n => clubNames.includes(n) && n !== manager.club))
+    && (manager.matchdayIndex || 0) <= manager.fixture.length;
+
+  if (!tableOk || !fixtureOk) {
+    // Auto-reparación / inicio de temporada: tabla en cero solo con los clubes de la liga
+    manager.table = clubs.map(c => ({
       club: c.name,
       pj: 0,
       g: 0,
@@ -631,23 +673,20 @@ function ensureDTFixture(manager) {
       dg: 0,
       pts: 0
     }));
-  }
 
-  // Generar fixture ordenado (ida y vuelta o ida completa) si no está inicializado
-  if (!manager.fixture || !Array.isArray(manager.fixture) || manager.fixture.length === 0 || manager.matchdayIndex >= manager.fixture.length) {
     if (opponents.length === 0) {
       // Fallback
       manager.fixture = ['Rival de Liga 1', 'Rival de Liga 2', 'Rival de Liga 3', 'Rival de Liga 4'];
     } else {
       // Mezclar rivales para que cada temporada tenga un calendario fresco
       const shuffled = [...opponents].sort(() => Math.random() - 0.5);
-      // Ida y vuelta si la liga tiene menos de 10 equipos, o ida si tiene muchos
-      const rounds = shuffled.length <= 8 ? [...shuffled, ...[...opponents].sort(() => Math.random() - 0.5)] : shuffled;
+      const rounds = opponents.length <= 8 ? [...shuffled, ...[...opponents].sort(() => Math.random() - 0.5)] : shuffled;
       manager.fixture = rounds.map(c => c.name);
     }
     manager.matchdayIndex = 0;
-    manager.matchdayTotal = manager.fixture.length;
   }
+
+  manager.matchdayTotal = manager.fixture.length;
 
   const nextOpponent = manager.fixture[manager.matchdayIndex] || (opponents[0] ? opponents[0].name : 'Rival de Liga');
   return nextOpponent;
@@ -672,6 +711,10 @@ function advanceDTLeague(manager, matchResult) {
     manager.fixture = [];
     manager.table = [];
     manager.matchdayIndex = 0;
+    manager.nationalCup = null;
+    manager.cup = null;
+    manager.qualifiedContinentalCup = null;
+    manager.stage = 'liga';
     ensureDTFixture(manager);
     return {
       matchdayIndex: 0,
@@ -685,6 +728,22 @@ function advanceDTLeague(manager, matchResult) {
 
   ensureDTFixture(manager);
 
+  // Si la liga ya terminó, no se registra nada más en la tabla (los partidos siguientes son de copa)
+  if (manager.matchdayIndex >= manager.fixture.length) {
+    const sorted = dtTableSorted(manager.table || []);
+    return {
+      matchdayIndex: manager.matchdayIndex,
+      matchdayTotal: manager.matchdayTotal,
+      position: sorted.findIndex(t => t.club === manager.club) + 1,
+      totalClubs: sorted.length,
+      seasonEnded: true
+    };
+  }
+
+  const oppName = (typeof matchResult.opponentName === 'object' && matchResult.opponentName)
+    ? matchResult.opponentName.name
+    : matchResult.opponentName;
+
   // 1. Actualizar el partido del DT y de su rival en la tabla
   let myRow = manager.table.find(t => t.club === manager.club);
   if (!myRow) {
@@ -692,39 +751,42 @@ function advanceDTLeague(manager, matchResult) {
     manager.table.push(myRow);
   }
 
-  let oppRow = manager.table.find(t => t.club === matchResult.opponentName);
-  if (!oppRow) {
-    oppRow = { club: matchResult.opponentName, pj: 0, g: 0, e: 0, p: 0, gf: 0, gc: 0, dg: 0, pts: 0 };
-    manager.table.push(oppRow);
-  }
+  // El rival solo suma en la tabla si pertenece a la liga (nunca rivales de copa)
+  const oppRow = manager.table.find(t => t.club === oppName) || null;
 
   myRow.pj++;
   myRow.gf += matchResult.myGoals;
   myRow.gc += matchResult.oppGoals;
   myRow.dg = myRow.gf - myRow.gc;
 
-  oppRow.pj++;
-  oppRow.gf += matchResult.oppGoals;
-  oppRow.gc += matchResult.myGoals;
-  oppRow.dg = oppRow.gf - oppRow.gc;
+  if (oppRow) {
+    oppRow.pj++;
+    oppRow.gf += matchResult.oppGoals;
+    oppRow.gc += matchResult.myGoals;
+    oppRow.dg = oppRow.gf - oppRow.gc;
+  }
 
   if (matchResult.result === 'V') {
     myRow.g++;
     myRow.pts += 3;
-    oppRow.p++;
+    if (oppRow) oppRow.p++;
   } else if (matchResult.result === 'E') {
     myRow.e++;
     myRow.pts += 1;
-    oppRow.e++;
-    oppRow.pts += 1;
+    if (oppRow) {
+      oppRow.e++;
+      oppRow.pts += 1;
+    }
   } else {
     myRow.p++;
-    oppRow.g++;
-    oppRow.pts += 3;
+    if (oppRow) {
+      oppRow.g++;
+      oppRow.pts += 3;
+    }
   }
 
   // 2. Simular los demás partidos de la fecha en la liga entre clubes AI
-  const otherClubs = manager.table.filter(t => t.club !== manager.club && t.club !== matchResult.opponentName);
+  const otherClubs = manager.table.filter(t => t.club !== manager.club && t.club !== oppName);
   for (let i = 0; i < otherClubs.length - 1; i += 2) {
     const c1 = otherClubs[i];
     const c2 = otherClubs[i + 1];
@@ -917,6 +979,10 @@ function acceptManagerJobOffer(manager, targetClubName) {
   manager.table = [];
   manager.matchdayIndex = 0;
   manager.jobOffers = [];
+  manager.nationalCup = null;
+  manager.cup = null;
+  manager.qualifiedContinentalCup = null;
+  manager.stage = 'liga';
 
   // Crear fixture para el nuevo club
   ensureDTFixture(manager);
@@ -1076,13 +1142,16 @@ function simulateEntireDTSeason(manager) {
   }
 
   ensureDTFixture(manager);
+  manager.stage = 'liga';
   const totalFechas = manager.matchdayTotal || 16;
   const matchesSimulated = [];
 
   while (manager.matchdayIndex < totalFechas) {
-    const opp = ensureDTFixture(manager);
+    const opp = manager.fixture[manager.matchdayIndex];
+    const before = manager.matchdayIndex;
     const res = simulateDTMatch(manager, opp);
     matchesSimulated.push(res);
+    if (manager.matchdayIndex === before) break; // seguridad anti-bucle infinito
   }
 
   // Al finalizar la temporada, generamos ofertas para el nuevo periodo
