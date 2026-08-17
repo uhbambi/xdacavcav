@@ -48,20 +48,35 @@ function recordSeasonInTimeline(player, seasonEndData = {}) {
  * Formatea el timeline completo para mostrar en Discord
  */
 function formatTimelineEmbedText(player) {
-  const history = player.career?.seasonHistory || [];
+  const history = player.career?.seasonHistory || player.careerHistory || [];
   if (history.length === 0) {
-    return `*Aún no has completado tu primera temporada oficial en el club **${player.club}**.*`;
+    const club = player.club || 'tu club';
+    return `*Aún no has completado tu primera temporada oficial en **${club}**.*`;
   }
 
   const lines = history.map(h => {
-    const trophiesStr = h.trophiesWon.length > 0 ? ` 🏆 ${h.trophiesWon.join(', ')}` : '';
-    const awardsStr = h.awardsWon.length > 0 ? ` ⭐ ${h.awardsWon.map(a => a.split(' ')[0] + ' ' + (a.split(' ')[1] || '')).join(', ')}` : '';
+    const trophies = Array.isArray(h.trophiesWon) ? h.trophiesWon : (Array.isArray(h.trophies) ? h.trophies : []);
+    const awards = Array.isArray(h.awardsWon) ? h.awardsWon : [];
+    const trophiesStr = trophies.length > 0 ? ` 🏆 ${trophies.join(', ')}` : '';
+    const awardsStr = awards.length > 0 ? ` ⭐ ${awards.map(a => typeof a === 'string' ? a.split(' ')[0] + ' ' + (a.split(' ')[1] || '') : '').join(', ')}` : '';
     const isPortero = player.position === 'POR';
-    const statsStr = isPortero
-      ? `${h.apps} PJ | ${h.cleanSheets} Invictas | ⭐ ${h.avgRating}`
-      : `${h.apps} PJ | ⚽ ${h.goals} | 🎯 ${h.assists} | ⭐ ${h.avgRating}`;
+    const isDT = !player.position || player.records?.matches !== undefined;
 
-    return `🗓️ **Temporada ${h.season} (${h.year})** — ${h.flag} **${h.club}** (Media ${h.overall})\n` +
+    let statsStr = '';
+    if (isDT) {
+      statsStr = `${h.matches || h.apps || 0} PJ | ${h.wins || 0}V - ${h.draws || 0}E - ${h.losses || 0}D | ⭐ ${h.reputation || player.reputation || 50} Rep`;
+    } else if (isPortero) {
+      statsStr = `${h.apps || 0} PJ | ${h.cleanSheets || 0} Invictas | ⭐ ${h.avgRating || '0.0'}`;
+    } else {
+      statsStr = `${h.apps || 0} PJ | ⚽ ${h.goals || 0} | 🎯 ${h.assists || 0} | ⭐ ${h.avgRating || '0.0'}`;
+    }
+
+    const seasonNum = h.season || h.seasons || 1;
+    const yearStr = h.year ? ` (${h.year})` : '';
+    const flag = h.flag || flagFor(h.country || player.nationality || 'Chile');
+    const media = h.overall || h.clubMedia || player.overall || 65;
+
+    return `🗓️ **Temporada ${seasonNum}${yearStr}** — ${flag} **${h.club || player.club}** (Media ${media})\n` +
            `└ ${statsStr}${trophiesStr}${awardsStr}`;
   });
 
