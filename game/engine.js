@@ -44,7 +44,7 @@ const { inductIntoHallOfFame, formatHallOfFameEmbed } = require('../utils/hallOf
 const { getTopOverall, getTopMarketValue, getTopWonderkids, getTopByCountry } = require('../utils/worldRankings.js');
 const { normalizePersonality } = require('../utils/personality.js');
 const { normalizeDNA, describeDNA, dnaProfile, dnaLabel, clutchRatingBonus, penaltyBoost } = require('../utils/dna.js');
-const { normalizeFanRelation, recordFanMatch, maybeFanMoment, describeFanStatus, fanBar, fanTier } = require('../utils/fans.js');
+const { normalizeFanRelation, recordFanMatch, maybeFanMoment, describeFanStatus, fanBar, fanTier, goleadaRiotText, isGoleadaEnContra } = require('../utils/fans.js');
 const { getStadium, stadiumLine, describeStadium, attendanceFor, revenueFor } = require('../utils/stadium.js');
 const { generatePersonalObjectives, objectivesProgress, evaluateAndApplyPersonalObjectives } = require('../utils/personalObjectives.js');
 const { advanceNpcWorld, getNpcWonderkids, getLastWindow, getNpcFreeAgents, getNpcTop } = require('../utils/npcWorld.js');
@@ -226,8 +226,11 @@ function matchAtmosphereText(player, context = {}) {
   const fanMoment = maybeFanMoment(player, {
     result: context.result,
     goals: context.goals || 0,
+    myGoals: context.myGoals,
+    oppGoals: context.oppGoals,
     isClassic: context.isClassic,
-    isFinal: context.isFinal
+    isFinal: context.isFinal,
+    club: player.club
   });
   if (fanMoment) parts.push(fanMoment);
   const drama = maybeDramaFlash(player, { result: context.result });
@@ -357,9 +360,11 @@ function applyMatchToPlayer(player, result, { national = false } = {}) {
     isClassic: Boolean(result.isClassic)
   });
 
-  // 2b. Relación con la hinchada
+  // 2b. Relación con la hinchada (goleadas en contra pegan más fuerte)
   recordFanMatch(player, result.result, {
     goals: result.playerGoals,
+    myGoals: result.myGoals,
+    oppGoals: result.oppGoals,
     isClassic: Boolean(result.isClassic),
     isFinal: Boolean(result.isFinal),
     motm: result.motm
@@ -741,6 +746,8 @@ function playLeagueMatch(userId, player, tacticKey, bonus) {
   const atmosphere = matchAtmosphereText(player, {
     result: result.result,
     goals: result.playerGoals,
+    myGoals: result.myGoals,
+    oppGoals: result.oppGoals,
     isClassic: Boolean(classicData),
     isNational: false,
     opponentMedia: opponentClub ? opponentClub.media : 60
@@ -802,6 +809,8 @@ function playTournamentMatch(userId, player, tacticKey, bonus) {
   const atmosphere = matchAtmosphereText(player, {
     result: result.result,
     goals: result.playerGoals,
+    myGoals: result.myGoals,
+    oppGoals: result.oppGoals,
     isClassic: false,
     isFinal: isFinal(tournament),
     isNational
@@ -1900,8 +1909,11 @@ function fansView(userId) {
       `**${tier.emoji} ${tier.title}** — ${fan.score}/100\n` +
       `\`${fan.bar}\`\n\n` +
       `🏟️ **Club:** ${player.club}\n` +
-      `⚽ Goles que suben tu vínculo con la gente. Las derrotas y las malas declaraciones lo erosionan.` +
-      (player.fanRelation >= 92 ? `\n\n👑 **Sos ídolo eterno:** la tribuna te va a recordar para siempre.` : player.fanRelation >= 65 ? `\n\n❤️ **La gente te quiere:** seguí dando alegrías para llegar a ídolo.` : player.fanRelation < 35 ? `\n\n🚨 **La hinchada está caliente:** necesitás un partidazo para recomponer la relación.` : '')
+      `⚽ Goles que suben tu vínculo con la gente. Las derrotas, y sobre todo las **goleadas en contra**, lo erosionan: la hinchada puede invadir la cancha, tirar cosas y perseguir al plantel.` +
+      (player.fanRelation >= 92 ? `\n\n👑 **Sos ídolo eterno:** la tribuna te va a recordar para siempre.` : player.fanRelation >= 65 ? `\n\n❤️ **La gente te quiere:** seguí dando alegrías para llegar a ídolo.` : player.fanRelation < 35 ? `\n\n🚨 **La hinchada está caliente:** necesitás un partidazo para recomponer la relación.` : '') +
+      (fan.lastEvents && fan.lastEvents.length
+        ? `\n\n🧨 **Últimos disturbios:**\n${fan.lastEvents.map(e => `• ${e.score ? `**${e.score}** · ` : ''}${String(e.text || '').replace(/\*\*/g, '').slice(0, 140)}`).join('\n')}`
+        : '')
     );
 
   return { ok: true, ephemeral: false, embeds: [embed], components: (!player.retired && player.stage !== 'entretemporada') ? [continueRow(userId)] : [] };
@@ -3026,6 +3038,9 @@ function dtSimulateStep(userId) {
         `📋 **Crónica de Jugadas Clave:**\n` +
         matchSim.events.map(e => `• **${e.minute}'** ${e.title}\n  ${e.desc}`).join('\n\n') +
         leagueText +
+        (isGoleadaEnContra({ result: matchSim.result, myGoals: matchSim.myGoals, oppGoals: matchSim.oppGoals })
+          ? `\n\n${goleadaRiotText({ name: manager.name, club: manager.club, season: manager.season }, { myGoals: matchSim.myGoals, oppGoals: matchSim.oppGoals, club: manager.club })}`
+          : '') +
         (manager.stage === 'copa_nacional' ? `\n\n🏆 **¡Finalizó la fase de Liga!** Ahora tu equipo disputará la **${manager.nationalCup?.name || 'Copa Nacional'}**.` : '') +
         `\n\n📊 **Confianza Directiva:** ${manager.boardConfidence}% | **Hinchada:** ${manager.fanConfidence}%`
       )

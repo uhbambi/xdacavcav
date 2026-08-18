@@ -46,13 +46,32 @@ console.log('TEST 1: Sistema de estadios');
   assert(typeof colo.capacity === 'number' && colo.capacity > 10000, 'capacidad inválida');
   assert(typeof colo.avgAttendance === 'number' && colo.avgAttendance <= colo.capacity, 'asistencia > capacidad');
   assert(colo.atmosphere >= 20 && colo.atmosphere <= 100, 'ambiente fuera de rango');
+  assert(colo.name === 'Estadio Monumental David Arellano', `Colo-Colo no tiene su estadio real (${colo.name})`);
+  assert(colo.capacity === 47347, `capacidad de Colo-Colo incorrecta (${colo.capacity})`);
+  assert(colo.city === 'Santiago', 'Colo-Colo sin ciudad');
+  assert(colo.official === true, 'estadio de Colo-Colo no marcado como oficial');
+
+  const madrid = stadium.getStadium('Real Madrid');
+  assert(madrid.name.includes('Bernabéu'), `Real Madrid sin Bernabéu (${madrid.name})`);
+  assert(madrid.capacity >= 80000, 'Bernabéu con capacidad chica');
+
+  const boca = stadium.getStadium('Boca Juniors');
+  assert(boca.name.includes('Bombonera') || boca.name.includes('Armando'), `Boca sin Bombonera (${boca.name})`);
+
+  const { getAllClubs } = require('../data/clubs.js');
+  const { findStadium } = require('../data/stadiums.js');
+  const missing = getAllClubs().filter(c => !findStadium(c.name));
+  assert(missing.length === 0, `faltan estadios de ${missing.length} clubes: ${missing.slice(0, 8).map(c => c.name).join(', ')}`);
 
   const classicAtt = stadium.attendanceFor(colo, { isClassic: true });
   const weakAtt = stadium.attendanceFor(colo, { opponentMedia: 50 });
   assert(classicAtt > weakAtt, `un clásico (${classicAtt}) no llena más que un partido contra el último (${weakAtt})`);
   const revenue = stadium.revenueFor(colo, classicAtt);
   assert(revenue > 0, 'recaudación inválida');
-  assert(stadium.stadiumLine('Colo-Colo', { isClassic: true }).includes('Asistencia'), 'stadiumLine sin asistencia');
+  const line = stadium.stadiumLine('Colo-Colo', { isClassic: true });
+  assert(line.includes('Asistencia'), 'stadiumLine sin asistencia');
+  assert(line.includes('Monumental'), 'stadiumLine sin nombre real');
+  assert(line.includes('47,347') || line.includes('47347'), 'stadiumLine sin capacidad');
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -72,6 +91,24 @@ console.log('TEST 2: Hinchada y relación con el club');
   p.fanRelation = 90;
   const t = fans.fanTier(90);
   assert(t.emoji === '🔥' || t.emoji === '👑', 'un 90 de relación no es ídolo');
+
+  const victim = newPlayer({ name: 'Goleado', position: 'DEL', nationalityLeagueKey: 'CHILE' });
+  victim.club = 'Colo-Colo';
+  fans.normalizeFanRelation(victim);
+  const beforeGoleada = victim.fanRelation;
+  fans.recordFanMatch(victim, 'D', { myGoals: 0, oppGoals: 4, goals: 0 });
+  assert(victim.fanRelation < beforeGoleada - 8, 'una goleada 0-4 no hundió la relación con la hinchada');
+  assert(fans.isGoleadaEnContra({ result: 'D', myGoals: 1, oppGoals: 4 }), '1-4 no se detectó como goleada');
+  assert(!fans.isGoleadaEnContra({ result: 'D', myGoals: 1, oppGoals: 2 }), '1-2 no debería ser goleada');
+  const riot = fans.maybeFanMoment(victim, { result: 'D', myGoals: 0, oppGoals: 5, club: 'Colo-Colo' });
+  assert(riot && /invasión|objetos|cazar|butacazo|bengalas|emboscada|túnel|toma/i.test(riot), `goleada sin disturbio: ${riot}`);
+  assert(riot.includes('Monumental') || riot.includes('estadio') || riot.includes('INVASIÓN') || riot.includes('hinchada'), 'el disturbio no nombra el estadio/hinchada');
+  assert(Array.isArray(victim.fanEvents) && victim.fanEvents[0] && victim.fanEvents[0].type === 'goleada', 'no se guardó el disturbio');
+  const noRiot = fans.maybeFanMoment(
+    { ...victim, fanRelation: 70, fanEvents: [] },
+    { result: 'E', myGoals: 1, oppGoals: 1, club: 'Colo-Colo' }
+  );
+  assert(!noRiot || !/INVASIÓN|Lluvia de objetos|cazar al plantel/i.test(noRiot || ''), 'un empate disparó disturbio de goleada');
 }
 
 // ─────────────────────────────────────────────────────────────────

@@ -6,7 +6,7 @@ const engine = require('../game/engine.js');
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('estadio')
-    .setDescription('Consulta el estadio de tu club: capacidad, asistencia, ambiente, ingresos y remodelaciones'),
+    .setDescription('Consulta el estadio de tu club: nombre real, capacidad, ciudad, asistencia y taquilla'),
 
   async execute(interaction) {
     const view = engine.stadiumView(interaction.user.id);
