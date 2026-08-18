@@ -1,12 +1,12 @@
 'use strict';
 
 const { findClub } = require('../data/clubs.js');
+const { findStadium } = require('../data/stadiums.js');
 const { rand } = require('./simulation.js');
 
 /**
- * Sistema de estadios: cada club tiene capacidad, asistencia promedio, ambiente,
- * ingresos por partido, estado e historial de mejoras/remodelaciones.
- * Los datos se derivan de forma estable de la media/tier del club (cache en memoria).
+ * Sistema de estadios: cada club tiene nombre real, capacidad, ciudad,
+ * asistencia promedio, ambiente, ingresos y remodelaciones.
  */
 
 const cache = new Map();
@@ -29,7 +29,7 @@ function stadiumNameFor(clubName) {
   return `${NAME_SUFFIXES[idx]} ${clubName}`;
 }
 
-/** Capacidad según la media del club. */
+/** Capacidad según la media del club (fallback si no hay dato real). */
 function capacityFor(media) {
   const m = Math.max(45, Math.min(91, media));
   const base = 9000 + Math.round(Math.pow(m - 44, 2.15) * 3.4);
@@ -42,27 +42,29 @@ function getStadium(clubName) {
   if (cache.has(key)) return cache.get(key);
 
   const club = findClub(clubName) || { name: clubName, media: 65, tier: 2, country: 'Chile', leagueKey: 'CHILE_A' };
+  const real = findStadium(club.name || clubName);
   const media = club.media || 65;
-  const capacity = capacityFor(media);
+  const capacity = real ? real.capacity : capacityFor(media);
 
   const h = hashString(key);
   const fill = 0.52 + (media - 45) * 0.006 + ((h % 10) / 100); // 0.52..0.80
   const avgAttendance = Math.round(capacity * Math.min(0.96, Math.max(0.35, fill)));
 
   const stadium = {
-    name: stadiumNameFor(club.name),
+    name: real ? real.name : stadiumNameFor(club.name),
     club: club.name,
+    city: real ? real.city : (club.country || ''),
     country: club.country,
     capacity,
     avgAttendance,
-    atmosphere: Math.round(50 + (media - 45) * 0.8 + (h % 15)), // ambiente base
-    ticketPrice: Math.round(12 + Math.pow(media - 44, 1.35)),   // USD por entrada
-    condition: 55 + (h % 45),                                    // 55..99
+    atmosphere: Math.round(50 + (media - 45) * 0.8 + (h % 15)),
+    ticketPrice: Math.round(12 + Math.pow(media - 44, 1.35)),
+    condition: 55 + (h % 45),
     lastRenovation: 2018 + (h % 7),
-    upgrades: []
+    upgrades: [],
+    official: Boolean(real)
   };
 
-  // Historial de remodelaciones estable por club
   if (stadium.condition < 70) {
     stadium.upgrades.push({ year: stadium.lastRenovation, type: 'Remodelación de tribunas', note: 'Ampliación y mejoras en accesos.' });
   }
@@ -82,7 +84,6 @@ function attendanceFor(stadium, context = {}) {
   else if (isClassic) factor *= 1.18;
   else if (isBigMatch) factor *= 1.1;
 
-  // Contra el último de la tabla hay menos gente
   if (opponentMedia <= 55) factor *= 0.85;
 
   const attendance = Math.round((stadium.avgAttendance || 0) * factor);
@@ -104,13 +105,14 @@ function atmosphereFor(stadium, context = {}) {
   return Math.max(20, Math.min(100, atm + rand(-6, 6)));
 }
 
-/** Texto resumido para embeds. */
+/** Texto resumido para embeds. Incluye nombre real y capacidad. */
 function stadiumLine(clubName, context = {}) {
   const stadium = getStadium(clubName);
   const att = attendanceFor(stadium, context);
   const atm = atmosphereFor(stadium, context);
   const revenue = revenueFor(stadium, att);
-  return `🏟️ **${stadium.name}** · Asistencia: **${att.toLocaleString('en-US')}** (${Math.round((att / stadium.capacity) * 100)}%) · Ambiente: ${'🔥'.repeat(Math.max(1, Math.round(atm / 25)))} · Taquilla: **$${revenue.toLocaleString('en-US')}**`;
+  const city = stadium.city ? ` · ${stadium.city}` : '';
+  return `🏟️ **${stadium.name}** (${stadium.capacity.toLocaleString('en-US')})${city} · Asistencia: **${att.toLocaleString('en-US')}** (${Math.round((att / stadium.capacity) * 100)}%) · Ambiente: ${'🔥'.repeat(Math.max(1, Math.round(atm / 25)))} · Taquilla: **$${revenue.toLocaleString('en-US')}**`;
 }
 
 function describeStadium(stadium) {
